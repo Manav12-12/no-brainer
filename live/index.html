@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>Drosophila Sentinel // Live neural simulation</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main>
+      <canvas id="scene" width="1920" height="1080" aria-label="Live Drosophila Sentinel neural simulation"></canvas>
+      <section class="controls" aria-label="Live simulation controls">
+        <button id="restart" type="button">New live run</button>
+        <button id="record" type="button">Record WebM</button>
+        <button id="fullscreen" type="button">Fullscreen</button>
+        <span id="status" role="status">Connecting to simulation</span>
+      </section>
+      <p class="caption">Live Brian2 compute · stylized 48-node proxy · simulated hosts only · no live Jev calls</p>
+    </main>
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

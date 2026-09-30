@@ -1,0 +1,27 @@
+mode: synthetic_mb_subnet
+resting_mv: -52.0
+reset_mv: -52.0
+threshold_mv: -45.0
+membrane_tau_ms: 20.0
+synaptic_tau_ms: 5.0
+refractory_ms: 2.2
+synaptic_delay_ms: 1.8
+weight_per_synapse_mv: 0.275
+stimulation_rate_hz: 150.0
+stimulation_weight_scale: 250.0
+simulation_ms: 100.0
+timestep_ms: 0.1
+codegen_target: numpy
+sources:
+  resting_mv: data/connectome/vendor_shiu/model.py:22
+  reset_mv: data/connectome/vendor_shiu/model.py:23
+  threshold_mv: data/connectome/vendor_shiu/model.py:24
+  membrane_tau_ms: data/connectome/vendor_shiu/model.py:25
+  synaptic_tau_ms: data/connectome/vendor_shiu/model.py:28
+  refractory_ms: data/connectome/vendor_shiu/model.py:31
+  synaptic_delay_ms: data/connectome/vendor_shiu/model.py:34
+  weight_per_synapse_mv: data/connectome/vendor_shiu/model.py:37
+  stimulation_rate_hz: data/connectome/vendor_shiu/model.py:39
+  stimulation_weight_scale: data/connectome/vendor_shiu/model.py:41
+  simulation_ms: data/connectome/vendor_shiu/model.py:17 adjusted for smoke-test budget
+  timestep_ms: Brian2 2.9.0 defaultclock.dt; vendored model.py does not override it

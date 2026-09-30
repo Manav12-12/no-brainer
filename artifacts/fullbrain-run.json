@@ -1,0 +1,29 @@
+{
+  "active_flywire_ids": [
+    720575940599797164,
+    720575940600101641,
+    720575940600322965,
+    720575940600433181,
+    720575940600646173,
+    720575940600722348,
+    720575940601103625,
+    720575940601325484,
+    720575940601412361
+  ],
+  "active_neurons": 9,
+  "asset_release": "FlyWire v783",
+  "asset_sha256": {
+    "Completeness_783.csv": "bbb847a4cc2caaa7a16349722d220c087317b946d148d4d592d94d250617a311",
+    "Connectivity_783.parquet": "efeb23fb99098e9c390f6869969b2a121a2ee92c833cfc45ecb2c1d8e1af0347"
+  },
+  "connections": 15091983,
+  "duration_ms": 5.0,
+  "elapsed_seconds": 1.1342965609983366,
+  "git_commit": "cd9b945c10cc3b720e31b460064f773f4d719f8c",
+  "max_spikes_per_neuron": 1,
+  "neurons": 138639,
+  "python": "3.11.16",
+  "seed": 1729,
+  "simulation_scope": "all neurons and all directed connections",
+  "total_spikes": 9
+}

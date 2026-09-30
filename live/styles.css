@@ -1,0 +1,78 @@
+:root {
+  color: #e9fcff;
+  background: #010207;
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 38%, rgba(14, 32, 70, 0.62), transparent 46%),
+    linear-gradient(150deg, #02040b, #050817 54%, #010207);
+}
+
+main {
+  width: min(100vw, 177.78vh);
+  padding: 10px;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid rgba(77, 229, 255, 0.26);
+  border-radius: 12px;
+  background: #010207;
+  box-shadow: 0 0 80px rgba(35, 195, 255, 0.12);
+}
+
+.controls {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding-top: 9px;
+}
+
+button {
+  color: #eaffff;
+  background: rgba(6, 18, 35, 0.94);
+  border: 1px solid rgba(67, 226, 255, 0.45);
+  border-radius: 5px;
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+button:hover { background: rgba(14, 46, 72, 0.96); }
+button:focus-visible { outline: 2px solid #ff55c7; outline-offset: 2px; }
+
+#status {
+  min-width: 230px;
+  color: #65eaff;
+  font-size: 11px;
+}
+
+.caption {
+  margin: 3px 0 0;
+  text-align: center;
+  color: #526c7c;
+  font-size: 10px;
+}
+
+body:fullscreen main { width: min(100vw, 177.78vh); }
+
+@media (max-width: 700px) {
+  main { padding: 3px; }
+  .controls { gap: 4px; flex-wrap: wrap; }
+  button { padding: 6px 8px; font-size: 10px; }
+  #status { min-width: 160px; font-size: 9px; }
+}

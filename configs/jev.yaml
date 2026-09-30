@@ -1,0 +1,14 @@
+mode: replay
+model_id: jev-1.13.0
+base_url: https://api.typesafe.ai
+endpoint: /v1/systemone
+timeout_seconds: 10.0
+max_retries: 2
+backoff_initial_seconds: 0.5
+backoff_max_seconds: 5.0
+backoff_jitter_fraction: 0.25
+max_calls: 1000
+estimated_cost_usd_ceiling: 1.0
+input_usd_per_million_tokens: 0.042
+cache_path: data/jev_cache/responses.jsonl
+serialization_version: sentinel-features-v1

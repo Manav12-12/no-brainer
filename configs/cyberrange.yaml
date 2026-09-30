@@ -1,0 +1,4 @@
+hosts: 12
+segments: [user, server, dmz]
+episode_steps: 40
+benign_episode_fraction: 0.25

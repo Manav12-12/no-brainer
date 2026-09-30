@@ -1,0 +1,100 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "drosophila-sentinel"
+version = "0.1.0"
+description = "Offline cyber-defense simulation with Jev and a connectome-constrained LIF model"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = {file = "LICENSE"}
+dependencies = [
+  "brian2==2.9.0",
+  "httpx==0.28.1",
+  "matplotlib==3.10.3",
+  "networkx==3.5",
+  "numpy==2.2.6",
+  "pandas==2.3.0",
+  "pyarrow==20.0.0",
+  "pydantic==2.11.7",
+  "pyyaml==6.0.2",
+  "scikit-learn==1.7.0",
+  "scipy==1.15.3",
+  "torch==2.7.1",
+  "typer==0.16.0",
+]
+
+[project.scripts]
+sentinel = "sentinel.cli:app"
+
+[dependency-groups]
+dev = [
+  "bandit==1.8.5",
+  "detect-secrets==1.5.0",
+  "hypothesis==6.135.26",
+  "mypy==1.16.1",
+  "pip-audit==2.9.0",
+  "pip-licenses==5.0.0",
+  "pre-commit==4.2.0",
+  "pytest==9.0.3",
+  "pytest-cov==6.2.1",
+  "pytest-socket==0.7.0",
+  "pytest-timeout==2.4.0",
+  "respx==0.22.0",
+  "ruff==0.12.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sentinel"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers --timeout=60"
+testpaths = ["tests"]
+markers = [
+  "unit: isolated unit tests",
+  "integration: multi-component tests",
+  "property: property-based tests",
+  "audit: security and policy checks",
+  "slow: tests excluded from the default run",
+  "fullbrain: full connectome tests requiring explicit opt-in",
+  "live_jev: manual tests that may call the real Jev API",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+extend-exclude = ["data/connectome/vendor_shiu"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "SIM", "RUF"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["sentinel"]
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["yaml", "brian2", "pandas", "sklearn.*", "networkx"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["sentinel"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+
+[tool.bandit]
+exclude_dirs = ["tests", "wheelhouse"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }

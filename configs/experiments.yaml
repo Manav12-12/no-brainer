@@ -1,0 +1,3 @@
+seeds: [101, 202, 303, 404, 505, 606, 707, 808, 909, 1010]
+arms: [B0, B1, B1L, B2, B3, B4, B5, B6]
+run_fullbrain: false

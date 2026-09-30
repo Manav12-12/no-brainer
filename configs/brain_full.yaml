@@ -1,0 +1,18 @@
+mode: full_flywire
+resting_mv: -52.0
+reset_mv: -52.0
+threshold_mv: -45.0
+membrane_tau_ms: 20.0
+synaptic_tau_ms: 5.0
+refractory_ms: 2.2
+synaptic_delay_ms: 1.8
+weight_per_synapse_mv: 0.275
+stimulation_rate_hz: 150.0
+stimulation_weight_scale: 250.0
+simulation_ms: 1000.0
+timestep_ms: 0.1
+codegen_target: cython
+minimum_ram_gib: 16
+sources:
+  constants: data/connectome/vendor_shiu/model.py:15-52
+  timestep_ms: Brian2 2.9.0 defaultclock.dt; vendored model.py does not override it
