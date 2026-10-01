@@ -166,7 +166,9 @@ def main() -> None:
                 "action_confidence": action.confidence,
                 "reflex_confidence": confidence,
                 "reflex_acted": bool(
-                    known >= 0.5 and confidence >= 0.8 and action.selected != "no_op"
+                    known >= config.known_pattern_threshold
+                    and confidence >= config.reflex_confidence_threshold
+                    and action.selected != "no_op"
                 ),
                 "latency_ms": result.latency_ms,
                 "input_tokens": result.usage_input_tokens,

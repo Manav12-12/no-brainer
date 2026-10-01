@@ -1,0 +1,156 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from sentinel.brain.plasticity import train_kc_mbon_weights
+from sentinel.brain.runner import run_brain
+from sentinel.connectome.loader import synthetic_connectome
+from sentinel.cyberbody.attacker import KillChainStage
+from sentinel.cyberbody.env import CyberRange
+from sentinel.data.features import FEATURE_NAMES, FeaturePipeline
+from sentinel.data.synthetic import generate_synthetic_events
+from sentinel.orchestrator.drive import DriveParameters, HomeostaticDrive
+
+
+def validation_traces(root: Path) -> list[dict[str, Any]]:
+    training = generate_synthetic_events(800, 1729)
+    pipeline = FeaturePipeline.create().fit(training)
+    transformed = pipeline.transform(training)
+    values = transformed.loc[:, FEATURE_NAMES].to_numpy(dtype=np.float64)
+    labels = transformed["label"].to_numpy(dtype=np.int64)
+    selected = np.concatenate(
+        [np.flatnonzero(labels == 0)[:16], np.flatnonzero(labels == 1)[:16]]
+    )
+    graph = synthetic_connectome(1729)
+    train_kc_mbon_weights(
+        graph,
+        values[selected],
+        labels[selected],
+        duration_ms=50.0,
+        random_seed=21_729,
+        learning_rate=0.05,
+    )
+    traces: list[dict[str, Any]] = []
+    for benign_only in (False, True):
+        for episode_index in range(10):
+            seed = 30_000 + int(benign_only) * 1_000 + episode_index
+            environment = CyberRange(12, 16, seed, benign_only=benign_only)
+            events = []
+            for _ in range(16):
+                observation = environment.observe()
+                brain = run_brain(
+                    graph,
+                    observation.features,
+                    seed + observation.step,
+                    duration_ms=50.0,
+                )
+                attacked = observation.attacker.stage not in {
+                    KillChainStage.DORMANT,
+                    KillChainStage.CONTAINED,
+                }
+                events.append(
+                    {
+                        "host_id": observation.host_id,
+                        "novelty": brain.novelty_score,
+                        "drive_stimulation": brain.drive_stimulation,
+                        "attacked": attacked,
+                    }
+                )
+            traces.append({"benign_only": benign_only, "events": events})
+    return traces
+
+
+def score(
+    traces: list[dict[str, Any]], parameters: DriveParameters
+) -> dict[str, float]:
+    detections = 0
+    false_actions = 0
+    containment_steps: list[int] = []
+    attack_episodes = 0
+    benign_episodes = 0
+    for trace in traces:
+        drive = HomeostaticDrive(parameters)
+        acted = False
+        contained = False
+        if trace["benign_only"]:
+            benign_episodes += 1
+        else:
+            attack_episodes += 1
+        for step, event in enumerate(trace["events"]):
+            stimulation = 0.0 if contained else float(event["drive_stimulation"])
+            observation = drive.observe(str(event["host_id"]), stimulation)
+            if observation.current >= observation.threshold and not acted:
+                acted = True
+                drive.relieve(str(event["host_id"]))
+                if bool(event["attacked"]):
+                    detections += 1
+                    containment_steps.append(step)
+                    contained = True
+                else:
+                    false_actions += 1
+    return {
+        "detection_rate": detections / attack_episodes,
+        "false_action_rate": false_actions / benign_episodes,
+        "mean_time_to_contain": float(np.mean(containment_steps))
+        if containment_steps
+        else float("inf"),
+    }
+
+
+def main() -> None:
+    root = Path(__file__).resolve().parents[1]
+    traces = validation_traces(root)
+    candidates: list[tuple[float, float, float, DriveParameters]] = []
+    for window in (3, 4, 5):
+        for decay in (0.75, 0.82, 0.9):
+            for floor in (0.10, 0.15, 0.20, 0.25):
+                for threshold in (0.4, 0.6, 0.8, 1.0, 1.2):
+                    parameters = DriveParameters(
+                        window=window,
+                        decay=decay,
+                        gain=1.0,
+                        stimulation_floor=floor,
+                        threshold=threshold,
+                        relief_fraction=0.15,
+                    )
+                    metrics = score(traces, parameters)
+                    if metrics["false_action_rate"] <= 0.05:
+                        candidates.append(
+                            (
+                                metrics["detection_rate"],
+                                -metrics["mean_time_to_contain"],
+                                -metrics["false_action_rate"],
+                                parameters,
+                            )
+                        )
+    if not candidates:
+        raise RuntimeError("no drive candidate met the validation false-action cap")
+    parameters = max(candidates, key=lambda item: item[:3])[3]
+    result = {
+        "validation": score(traces, parameters),
+        "parameters": parameters.__dict__,
+        "validation_episodes": {
+            "attack": 10,
+            "benign": 10,
+            "steps_each": 16,
+            "seeds": "30000-30009 and 31000-31009",
+        },
+        "selection": (
+            "maximize attack-episode detection, then minimize containment time, "
+            "subject to benign-episode false-action rate <= 0.05"
+        ),
+        "held_out_used": False,
+    }
+    destination = root / "artifacts/drive-validation.json"
+    destination.write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    print(json.dumps(result, indent=2, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

@@ -28,4 +28,4 @@ def run_brain(
         params or LIFParameters(),
         seed,
     )
-    return brain_readout(graph, counts)
+    return brain_readout(graph, counts, rates)

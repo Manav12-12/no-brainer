@@ -26,6 +26,8 @@ class JevConfig(BaseModel):
     input_usd_per_million_tokens: float = Field(default=0.042, ge=0)
     cache_path: Path = Path("data/jev_cache/responses.jsonl")
     serialization_version: str = "sentinel-features-v1"
+    known_pattern_threshold: float = Field(default=0.27, ge=0, le=1)
+    reflex_confidence_threshold: float = Field(default=0.28, ge=0, le=1)
 
     def model_post_init(self, __context: Any) -> None:
         if self.model_id in {"jev-latest", "jev-preview"}:

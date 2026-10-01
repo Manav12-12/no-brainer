@@ -10,7 +10,10 @@ import pytest
 from sentinel.brain.encoder import SensoryEncoder
 from sentinel.brain.full_flywire import load_flywire_arrays
 from sentinel.brain.lif_model import LIFParameters, simulate_lif
-from sentinel.brain.plasticity import offline_kc_mbon_update
+from sentinel.brain.plasticity import (
+    offline_kc_mbon_update,
+    train_kc_mbon_weights,
+)
 from sentinel.brain.readout import brain_readout, read_population_activity
 from sentinel.brain.runner import run_brain
 from sentinel.connectome.annotations import population_ids, require_populations
@@ -77,10 +80,11 @@ def test_small_lif_is_reproducible_and_non_silent() -> None:
     sensory = population_ids(graph, "ORN")
     rates = np.full(len(sensory), 150.0)
     params = LIFParameters(codegen_target="numpy")
-    first = simulate_lif(graph, sensory, rates, 30.0, params, 77)
-    second = simulate_lif(graph, sensory, rates, 30.0, params, 77)
+    first = simulate_lif(graph, sensory, rates, 50.0, params, 77)
+    second = simulate_lif(graph, sensory, rates, 50.0, params, 77)
     assert first == second
-    assert sum(first.values()) > 0
+    for population in ("ORN", "PN", "KC", "MBON", "descending"):
+        assert sum(first[node] for node in population_ids(graph, population)) > 0
 
 
 @pytest.mark.integration
@@ -88,6 +92,26 @@ def test_brain_runner_synthetic_mode() -> None:
     output = run_brain(synthetic_connectome(), np.ones(40), 12, duration_ms=20)
     assert 0 <= output.novelty_score <= 1
     assert output.action in {"no_op", "isolate_host"}
+
+
+@pytest.mark.integration
+def test_plasticity_changes_weights_used_by_brain() -> None:
+    graph = synthetic_connectome()
+    edge = (population_ids(graph, "KC")[0], population_ids(graph, "MBON")[0])
+    initial = float(graph.edges[edge]["weight"])
+    report = train_kc_mbon_weights(
+        graph,
+        np.full((1, 40), 20.0),
+        np.ones(1, dtype=np.int64),
+        duration_ms=50.0,
+        random_seed=77,
+        learning_rate=0.05,
+    )
+    assert report.updated_edges == 96
+    assert report.l1_weight_delta > 0
+    assert float(graph.edges[edge]["weight"]) != initial
+    output = run_brain(graph, np.full(40, 20.0), 78, duration_ms=50.0)
+    assert output.population_activity["MBON"] > 0
 
 
 @pytest.mark.unit

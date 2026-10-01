@@ -1,0 +1,139 @@
+{
+  "durations": {
+    "100ms": {
+      "KC": {
+        "active_runs": 100,
+        "max_spikes": 192,
+        "mean_spikes": 172.8,
+        "p50_spikes": 168.0
+      },
+      "MBON": {
+        "active_runs": 100,
+        "max_spikes": 32,
+        "mean_spikes": 27.84,
+        "p50_spikes": 28.0
+      },
+      "ORN": {
+        "active_runs": 100,
+        "max_spikes": 81,
+        "mean_spikes": 69.44,
+        "p50_spikes": 70.0
+      },
+      "PN": {
+        "active_runs": 100,
+        "max_spikes": 72,
+        "mean_spikes": 60.64,
+        "p50_spikes": 64.0
+      },
+      "descending": {
+        "active_runs": 100,
+        "max_spikes": 12,
+        "mean_spikes": 9.12,
+        "p50_spikes": 9.0
+      }
+    },
+    "15ms": {
+      "KC": {
+        "active_runs": 2,
+        "max_spikes": 24,
+        "mean_spikes": 0.48,
+        "p50_spikes": 0.0
+      },
+      "MBON": {
+        "active_runs": 0,
+        "max_spikes": 0,
+        "mean_spikes": 0.0,
+        "p50_spikes": 0.0
+      },
+      "ORN": {
+        "active_runs": 100,
+        "max_spikes": 14,
+        "mean_spikes": 9.38,
+        "p50_spikes": 9.0
+      },
+      "PN": {
+        "active_runs": 77,
+        "max_spikes": 8,
+        "mean_spikes": 6.16,
+        "p50_spikes": 8.0
+      },
+      "descending": {
+        "active_runs": 0,
+        "max_spikes": 0,
+        "mean_spikes": 0.0,
+        "p50_spikes": 0.0
+      }
+    },
+    "20ms": {
+      "KC": {
+        "active_runs": 81,
+        "max_spikes": 24,
+        "mean_spikes": 19.44,
+        "p50_spikes": 24.0
+      },
+      "MBON": {
+        "active_runs": 34,
+        "max_spikes": 4,
+        "mean_spikes": 1.36,
+        "p50_spikes": 0.0
+      },
+      "ORN": {
+        "active_runs": 100,
+        "max_spikes": 19,
+        "mean_spikes": 12.92,
+        "p50_spikes": 13.0
+      },
+      "PN": {
+        "active_runs": 100,
+        "max_spikes": 16,
+        "mean_spikes": 8.24,
+        "p50_spikes": 8.0
+      },
+      "descending": {
+        "active_runs": 0,
+        "max_spikes": 0,
+        "mean_spikes": 0.0,
+        "p50_spikes": 0.0
+      }
+    },
+    "50ms": {
+      "KC": {
+        "active_runs": 100,
+        "max_spikes": 96,
+        "mean_spikes": 72.96,
+        "p50_spikes": 72.0
+      },
+      "MBON": {
+        "active_runs": 100,
+        "max_spikes": 16,
+        "mean_spikes": 11.64,
+        "p50_spikes": 12.0
+      },
+      "ORN": {
+        "active_runs": 100,
+        "max_spikes": 43,
+        "mean_spikes": 34.31,
+        "p50_spikes": 34.0
+      },
+      "PN": {
+        "active_runs": 100,
+        "max_spikes": 32,
+        "mean_spikes": 27.6,
+        "p50_spikes": 24.0
+      },
+      "descending": {
+        "active_runs": 100,
+        "max_spikes": 3,
+        "mean_spikes": 3.0,
+        "p50_spikes": 3.0
+      }
+    }
+  },
+  "flywire_v783_measurements": {
+    "excitatory_edge_connectivity_p99": 31.0,
+    "excitatory_indegree_median": 37.0
+  },
+  "input_rate_hz": 150.0,
+  "proxy_edge_connectivity": 31.0,
+  "runs_per_duration": 100
+}

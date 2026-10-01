@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
+from sentinel.brain.plasticity import train_kc_mbon_weights
 from sentinel.config import JevConfig, config_hash, load_yaml
 from sentinel.connectome.loader import random_sparse_mushroom_body, synthetic_connectome
 from sentinel.connectome.shuffle import degree_preserving_shuffle
@@ -26,6 +28,7 @@ from sentinel.jev.interface import DecisionModel
 from sentinel.jev.local_backend import LocalBackend
 from sentinel.jev.replay_backend import ReplayBackend
 from sentinel.jev.typesafe_backend import TypeSafeBackend
+from sentinel.orchestrator.drive import DriveParameters, HomeostaticDrive
 from sentinel.orchestrator.escalation import escalate_to_brain
 from sentinel.orchestrator.reflex_arc import evaluate_reflex
 from sentinel.seed import set_global_seed
@@ -58,7 +61,13 @@ def make_jev(root: Path, config: JevConfig, mode: str) -> DecisionModel:
 
 def train_local(
     seed: int,
-) -> tuple[LocalBackend, IsolationBaseline, AutoencoderBaseline]:
+) -> tuple[
+    LocalBackend,
+    IsolationBaseline,
+    AutoencoderBaseline,
+    NDArray[np.float64],
+    NDArray[np.int64],
+]:
     training = generate_synthetic_events(800, seed)
     pipeline = FeaturePipeline.create().fit(training)
     transformed = pipeline.transform(training)
@@ -70,6 +79,8 @@ def train_local(
         local,
         IsolationBaseline(seed).fit(benign),
         AutoencoderBaseline(seed).fit(benign, epochs=5),
+        values,
+        labels,
     )
 
 
@@ -81,6 +92,14 @@ def run_episode(
     local: LocalBackend,
     isolation: IsolationBaseline,
     autoencoder: AutoencoderBaseline,
+    known_pattern_threshold: float = 0.27,
+    reflex_confidence_threshold: float = 0.28,
+    brain_duration_ms: float = 50.0,
+    plasticity_features: NDArray[np.float64] | None = None,
+    plasticity_labels: NDArray[np.int64] | None = None,
+    plasticity_examples: int = 32,
+    plasticity_learning_rate: float = 0.05,
+    drive_parameters: DriveParameters | None = None,
 ) -> dict[str, Any]:
     environment = CyberRange(12, steps, seed)
     base_graph = synthetic_connectome(seed)
@@ -90,6 +109,29 @@ def run_episode(
         "B4": degree_preserving_shuffle(base_graph, seed),
         "B5": random_sparse_mushroom_body(seed),
     }
+    training_delta = 0.0
+    training_edges = 0
+    drive = HomeostaticDrive(drive_parameters or DriveParameters())
+    drive_actions = 0
+    peak_drive = 0.0
+    if (
+        arm in graphs
+        and plasticity_features is not None
+        and plasticity_labels is not None
+    ):
+        benign = np.flatnonzero(plasticity_labels == 0)[: plasticity_examples // 2]
+        attack = np.flatnonzero(plasticity_labels == 1)[: plasticity_examples // 2]
+        selected = np.concatenate([benign, attack])
+        report = train_kc_mbon_weights(
+            graphs[arm],
+            plasticity_features[selected],
+            plasticity_labels[selected],
+            duration_ms=brain_duration_ms,
+            random_seed=seed + 20_000,
+            learning_rate=plasticity_learning_rate,
+        )
+        training_delta = report.l1_weight_delta
+        training_edges = report.updated_edges
     actions = 0
     attack_events = 0
     detected_attacks = 0
@@ -114,29 +156,58 @@ def run_episode(
         action = DefensiveAction.NO_OP
         started = time.perf_counter()
         if arm == "B1":
-            reflex = evaluate_reflex(jev, state, 0.8)
+            reflex = evaluate_reflex(
+                jev,
+                state,
+                reflex_confidence_threshold,
+                known_pattern_threshold,
+            )
             jev_failures += int(not reflex.available)
             reflex_handled += int(not reflex.ascend)
             ascended += int(reflex.ascend)
             action = reflex.action or DefensiveAction.NO_OP
         elif arm == "B1L":
-            reflex = evaluate_reflex(local, state, 0.8)
+            reflex = evaluate_reflex(
+                local,
+                state,
+                reflex_confidence_threshold,
+                known_pattern_threshold,
+            )
             reflex_handled += int(not reflex.ascend)
             ascended += int(reflex.ascend)
             action = reflex.action or DefensiveAction.NO_OP
         elif arm in graphs:
             use_brain = arm != "B3"
             if arm == "B3":
-                reflex = evaluate_reflex(jev, state, 0.8)
+                reflex = evaluate_reflex(
+                    jev,
+                    state,
+                    reflex_confidence_threshold,
+                    known_pattern_threshold,
+                )
                 jev_failures += int(not reflex.available)
                 reflex_handled += int(not reflex.ascend)
                 action = reflex.action or DefensiveAction.NO_OP
                 use_brain = reflex.ascend
             if use_brain:
                 ascended += 1
-                _, action = escalate_to_brain(
-                    graphs[arm], observation.features, seed + observation.step, 15
+                brain, _ = escalate_to_brain(
+                    graphs[arm],
+                    observation.features,
+                    seed + observation.step,
+                    brain_duration_ms,
                 )
+                drive_observation = drive.observe(
+                    observation.host_id, brain.drive_stimulation
+                )
+                peak_drive = max(peak_drive, drive_observation.current)
+                if (
+                    drive_observation.current >= drive_observation.threshold
+                    and not environment.hosts[observation.host_id].isolated
+                ):
+                    action = DefensiveAction.ISOLATE_HOST
+                    drive.relieve(observation.host_id)
+                    drive_actions += 1
         elif arm == "B6":
             if isolation.detect(observation.features) or autoencoder.detect(
                 observation.features
@@ -165,6 +236,11 @@ def run_episode(
         "ascend_fraction": ascended / steps,
         "jev_failures": jev_failures,
         "mean_layer_latency_ms": layer_latency_ms / steps,
+        "plasticity_examples": plasticity_examples if arm in graphs else 0,
+        "plasticity_updated_edges": training_edges,
+        "plasticity_l1_weight_delta": training_delta,
+        "drive_actions": drive_actions,
+        "peak_drive": peak_drive,
     }
 
 
@@ -191,13 +267,24 @@ def main() -> None:
     root = Path(__file__).resolve().parents[1]
     experiment = load_yaml(root / "configs/experiments.yaml")
     cyber = load_yaml(root / "configs/cyberrange.yaml")
+    brain_config = load_yaml(root / "configs/brain_mb_subnet.yaml")
     jev_config = JevConfig.model_validate(load_yaml(root / "configs/jev.yaml"))
+    drive_parameters = DriveParameters(
+        window=int(brain_config["drive_window"]),
+        decay=float(brain_config["drive_decay"]),
+        gain=float(brain_config["drive_gain"]),
+        stimulation_floor=float(brain_config["drive_stimulation_floor"]),
+        threshold=float(brain_config["drive_threshold"]),
+        relief_fraction=float(brain_config["drive_relief_fraction"]),
+    )
     jev = make_jev(root, jev_config, arguments.mode)
     rows: list[dict[str, Any]] = []
     for seed_value in experiment["seeds"]:
         seed = int(seed_value)
         set_global_seed(seed)
-        local, isolation, autoencoder = train_local(seed)
+        local, isolation, autoencoder, training_values, training_labels = train_local(
+            seed
+        )
         for arm in experiment["arms"]:
             rows.append(
                 run_episode(
@@ -208,6 +295,14 @@ def main() -> None:
                     local,
                     isolation,
                     autoencoder,
+                    jev_config.known_pattern_threshold,
+                    jev_config.reflex_confidence_threshold,
+                    float(brain_config["simulation_ms"]),
+                    training_values,
+                    training_labels,
+                    int(brain_config["plasticity_examples"]),
+                    float(brain_config["plasticity_learning_rate"]),
+                    drive_parameters,
                 )
             )
     metadata = {
@@ -217,6 +312,7 @@ def main() -> None:
                 "experiments": experiment,
                 "cyberrange": cyber,
                 "jev": jev_config.model_dump(),
+                "brain": brain_config,
             }
         ),
         "git_commit": git_commit(root),

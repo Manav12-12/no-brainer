@@ -11,10 +11,11 @@ local and live Jev decisions, synthetic-connectome experiments, a full FlyWire
 v783 execution check, held-out attack-family evaluation, and a live browser
 visualization driven by Python simulation events.
 
-The engineering pipeline works, but the scientific result is negative. The
-connectome-derived B2 through B5 arms issued no actions and did not outperform
-shuffled or random controls. This project does not claim that a fly connectome
-improves intrusion detection.
+The current engineering result is a working closed loop: sustained anomalous
+stimulation raises per-host drive, drive triggers simulated isolation, the
+attacker transitions to `contained`, and subsequent drive falls. The result is
+not evidence that fly-connectome topology improves intrusion detection:
+shuffled and random controls also contained every held-out synthetic episode.
 
 ## How it works
 
@@ -31,12 +32,14 @@ flowchart LR
     G --> H
     H -->|confident| I[Simulated action]
     H -->|uncertain| J[Brian2 brain path]
-    J --> K[Readout and descending signal]
-    K --> I
-    I --> L[Feedback]
+    J --> K[Sensory and KC stimulation]
+    K --> L[Per-host sliding-window drive]
+    L -->|threshold crossed| I
+    I --> M[Telemetry becomes contained]
+    M --> N[Drive relief and decay]
 
-    M[Python simulation] -->|server-sent events| N[Live browser view]
-    O[FlyWire v783 assets] --> P[Full-connectome execution check]
+    O[Python simulation] -->|server-sent events| P[Live browser view]
+    Q[FlyWire v783 assets] --> R[Full-connectome execution check]
 ```
 
 The default workflow is offline. Only
@@ -45,6 +48,35 @@ visualization binds to `127.0.0.1`, receives each event as Python computes it,
 and never calls Jev.
 
 ## Measured results
+
+### Closed-loop held-out synthetic evaluation
+
+Drive parameters were selected only on 20 validation episodes. The following
+results use 10 fixed, disjoint evaluation seeds per arm:
+
+| Arm | Episodes contained | False-action rate | Mean steps to contain | P95 |
+| --- | ---: | ---: | ---: | ---: |
+| B1 Jev replay | 0% | 0% | — | — |
+| B2 trained proxy + drive | 100% | 0% | 5.1 | 6.0 |
+| B3 Jev-to-brain + drive | 100% | 0% | 5.1 | 6.0 |
+| B4 degree-preserving shuffle | 100% | 0% | 6.8 | 8.0 |
+| B5 random sparse graph | 100% | 0% | 7.5 | 8.55 |
+| B6 local baseline | 100% | 2.11% | 2.1 | 2.55 |
+
+B2–B5 each issued one drive action per episode. B6 was faster but issued 200
+actions and caused eight benign-host injuries across its 10 episodes. B4 and
+B5 remain honest controls: their comparable containment means these results do
+not establish a FlyWire-specific benefit. See `docs/RESULTS.md` for definitions
+and limitations.
+
+### Live drive proof
+
+The recorded browser run is driven by real Python state, not a prerecorded or
+JavaScript-generated drive trace:
+
+- [MP4 proof clip](docs/assets/drosophila-sentinel-drive-cycle.mp4)
+- [WebM source capture](docs/assets/drosophila-sentinel-drive-cycle.webm)
+- [action/relief frame](docs/assets/drive-action-relief.png)
 
 ### Full FlyWire execution
 
@@ -142,14 +174,15 @@ make live
 ```
 
 The command opens `http://127.0.0.1:8765`. Python fits the local reflex model,
-runs the cyber-range, and executes Brian2 one event at a time. Each completed
+    trains KC-to-MBON weights, runs the cyber-range, and executes Brian2 one event at a time. Each completed
 event streams directly to the browser. The display shows:
 
 - optic lobes, central brain volume, mushroom bodies, and central complex;
 - the descending pathway and segmented ventral nerve cord;
 - measured Brian2 spikes and active synthetic-connectome nodes;
 - attack targets, compromised hosts, and simulated isolation actions;
-- live compute time, confidence, spike count, and neural readout; and
+- live per-host drive buildup, threshold crossing, action, and relief;
+- compute time, confidence, spike count, and neural readout; and
 - stream progress and renderer frame rate.
 
 The visualization uses a 48-node synthetic connectome proxy so it can run
@@ -227,8 +260,8 @@ make test
 .venv/bin/python scripts/verify_manifest.py
 ```
 
-The final verification passed Ruff, strict mypy, 56 tests, Bandit,
-detect-secrets, and manifest verification. The test suite reached 88.40%
+The final verification passed Ruff, strict mypy, 58 tests, Bandit,
+detect-secrets, and manifest verification. The test suite reached 87.84%
 branch-aware coverage. The live dependency audit found no unsuppressed known
 vulnerabilities. `PYSEC-2026-113` is suppressed because the reviewed advisory
 states that the affected Arrow C++ API is not exposed by the Python binding used
@@ -256,6 +289,10 @@ here.
 - Jev is a closed vendor model. Results apply only to `jev-1.13.0` and the tested
   400-record calibration set.
 - Cached responses do not reflect future model or service changes.
-- The configured 0.8 threshold produced no Jev reflex actions in calibration.
-- B2 through B5 did not outperform shuffled or random controls. Whether a fly
-  connectome can add security value remains unresolved.
+- The Jev gate is an empirical operating point for the cached `jev-1.13.0`
+  distribution. Its locked cache partition detected 7% with 0% false actions.
+- The 48-node graph is an engineering proxy. Its aggregate edge weight is based
+  on a FlyWire asset statistic, not identified biological ORN/PN pathways.
+- B2 through B5 did not establish superiority over shuffled or random controls.
+  The shared sensory-pressure component is sufficient to drive B5 despite its
+  missing KC-to-MBON training edges.

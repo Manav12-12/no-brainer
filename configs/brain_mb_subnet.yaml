@@ -9,9 +9,17 @@ synaptic_delay_ms: 1.8
 weight_per_synapse_mv: 0.275
 stimulation_rate_hz: 150.0
 stimulation_weight_scale: 250.0
-simulation_ms: 100.0
+simulation_ms: 50.0
 timestep_ms: 0.1
 codegen_target: numpy
+plasticity_examples: 32
+plasticity_learning_rate: 0.05
+drive_window: 3
+drive_decay: 0.82
+drive_gain: 1.0
+drive_stimulation_floor: 0.15
+drive_threshold: 0.4
+drive_relief_fraction: 0.15
 sources:
   resting_mv: data/connectome/vendor_shiu/model.py:22
   reset_mv: data/connectome/vendor_shiu/model.py:23
@@ -25,3 +33,6 @@ sources:
   stimulation_weight_scale: data/connectome/vendor_shiu/model.py:41
   simulation_ms: data/connectome/vendor_shiu/model.py:17 adjusted for smoke-test budget
   timestep_ms: Brian2 2.9.0 defaultclock.dt; vendored model.py does not override it
+  proxy_edge_connectivity: FlyWire v783 Connectivity_783.parquet measured 99th percentile (31 contacts); explicit engineering proxy for reduced fan-in
+  plasticity_learning_rate: engineering choice validated on training/validation only
+  drive_parameters: validation-tuned engineering control loop; see artifacts/drive-validation.json

@@ -1,0 +1,23 @@
+{
+  "known_pattern_threshold": 0.27,
+  "limitations": [
+    "No independent Jev cache exists; this partitions the historical cache without new network calls.",
+    "The historical Phase 1 aggregate already described all 400 records."
+  ],
+  "locked_report_partition": {
+    "actions": 7,
+    "detection_rate": 0.07,
+    "false_action_rate": 0.0,
+    "records": 200
+  },
+  "method": "family-stratified 50/50 cached split; maximize validation detection subject to false-action rate <= 0.05",
+  "reflex_confidence_threshold": 0.28,
+  "seed": 1729,
+  "source": "artifacts/jev-live-calibration.json",
+  "validation": {
+    "actions": 14,
+    "detection_rate": 0.09,
+    "false_action_rate": 0.05,
+    "records": 200
+  }
+}

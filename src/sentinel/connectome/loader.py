@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 REQUIRED_COLUMNS = {"source", "target", "weight", "excitatory"}
+PROXY_EDGE_CONNECTIVITY = 31.0
 
 
 def load_connectome(path: Path) -> nx.DiGraph:
@@ -34,7 +35,11 @@ def load_connectome(path: Path) -> nx.DiGraph:
 
 
 def synthetic_connectome(seed: int = 0) -> nx.DiGraph:
-    graph = nx.DiGraph(synthetic_mode=True, seed=seed)
+    graph = nx.DiGraph(
+        synthetic_mode=True,
+        seed=seed,
+        proxy_edge_connectivity=PROXY_EDGE_CONNECTIVITY,
+    )
     populations = {
         "ORN": range(0, 8),
         "PN": range(8, 16),
@@ -46,18 +51,30 @@ def synthetic_connectome(seed: int = 0) -> nx.DiGraph:
     for population, nodes in populations.items():
         for node in nodes:
             graph.add_node(node, population=population)
-    for source in range(0, 8):
-        graph.add_edge(source, 8 + source, weight=4.0, excitatory=True)
-    for pn in range(8, 16):
-        for offset in range(3):
-            graph.add_edge(
-                pn, 16 + ((pn * 3 + offset) % 24), weight=2.0, excitatory=True
-            )
-    for kc in range(16, 40):
-        graph.add_edge(kc, 40 + kc % 4, weight=3.0, excitatory=True)
+    # A proxy edge represents an aggregate bundle of biological contacts. The
+    # value 31 is the measured 99th percentile edge connectivity in the local
+    # FlyWire v783 asset. Complete feed-forward fan-in compensates explicitly
+    # for reducing a graph with median excitatory in-degree 37 to 48 neurons.
+    feed_forward = (("ORN", "PN"), ("PN", "KC"), ("KC", "MBON"))
+    for source_name, target_name in feed_forward:
+        for source in populations[source_name]:
+            for target in populations[target_name]:
+                graph.add_edge(
+                    source,
+                    target,
+                    weight=PROXY_EDGE_CONNECTIVITY,
+                    excitatory=True,
+                )
+    for kc in populations["KC"]:
         graph.add_edge(44, kc, weight=1.0, excitatory=False)
-    for mbon in range(40, 44):
-        graph.add_edge(mbon, 45 + mbon % 3, weight=4.0, excitatory=True)
+    for mbon in populations["MBON"]:
+        for descending in populations["descending"]:
+            graph.add_edge(
+                mbon,
+                descending,
+                weight=PROXY_EDGE_CONNECTIVITY,
+                excitatory=True,
+            )
         graph.add_edge(mbon, 44, weight=1.0, excitatory=True)
     return graph
 

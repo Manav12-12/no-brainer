@@ -14,3 +14,11 @@ def test_live_stream_uses_simulated_spikes_and_actions() -> None:
     assert len(timeline) == config["total_steps"] == 24
     assert any(event["action"] != "no_op" for event in timeline)
     assert sum((event["brain"] or {}).get("total_spikes", 0) for event in timeline) > 0
+    drive_actions = [event for event in timeline if event["action_source"] == "drive"]
+    assert drive_actions
+    action = drive_actions[0]
+    assert action["drive"]["before_action"] >= action["drive"]["threshold"]
+    assert action["drive"]["current"] < action["drive"]["before_action"]
+    following = timeline[action["step"] + 1]
+    assert following["stage"] == "contained"
+    assert following["drive"]["current"] < action["drive"]["current"]

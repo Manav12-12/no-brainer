@@ -40,6 +40,8 @@ let renderedFps = 30;
 let recorder = null;
 let recordedChunks = [];
 let particleSeeds = [];
+const autoCapture = new URLSearchParams(window.location.search).has("autocapture");
+let autoCaptureStopping = false;
 const glowSprites = new Map();
 
 const backgroundLayer = makeLayer();
@@ -294,6 +296,14 @@ function drawHostNetwork(event, phase) {
     const position = hostPosition(index);
     const target = host.id === event.target_host;
     const color = host.isolated ? palette.amber : host.compromised ? palette.red : palette.green;
+    const threshold = event.drive?.threshold || config.drive_threshold || 1;
+    let displayedDrive = Number(host.drive || 0);
+    if (host.id === event.drive?.host_id && event.drive.relieved) {
+      const reliefPhase = Math.max(0, Math.min(1, (phase - 0.58) / 0.2));
+      displayedDrive = event.drive.relief_before
+        + (event.drive.relief_after - event.drive.relief_before) * reliefPhase;
+    }
+    const driveRatio = Math.max(0, Math.min(1.25, displayedDrive / threshold));
     const branchY = 730 + (index % 6) * 34;
     ctx.strokeStyle = host.isolated ? "rgba(255,199,80,0.25)" : "rgba(78,232,174,0.13)";
     ctx.lineWidth = target ? 2 : 1;
@@ -304,9 +314,16 @@ function drawHostNetwork(event, phase) {
     ctx.strokeStyle = color;
     ctx.lineWidth = target ? 2.5 : 1;
     ctx.fill(); ctx.stroke();
+    if (driveRatio > 0.02) {
+      orb(ctx, position.x, position.y, 12 + 18 * Math.min(1, driveRatio), palette.magenta, 0.16 + 0.42 * Math.min(1, driveRatio));
+    }
     if (target) orb(ctx, position.x, position.y, 10 + 4 * Math.sin(phase * Math.PI), color, 0.44);
     write(ctx, host.id.toUpperCase(), position.x, position.y - 7, 12, color, "center", 750);
     write(ctx, host.segment.toUpperCase(), position.x, position.y + 11, 8, palette.muted, "center", 500);
+    ctx.fillStyle = "rgba(71,91,112,0.42)";
+    ctx.fillRect(position.x - 59, position.y + 20, 118, 3);
+    ctx.fillStyle = driveRatio >= 1 ? palette.amber : palette.magenta;
+    ctx.fillRect(position.x - 59, position.y + 20, 118 * Math.min(1, driveRatio), 3);
   });
 }
 
@@ -446,7 +463,34 @@ function drawHud(event, phase, now) {
   write(ctx, `KC ${Number(activity.KC || 0).toFixed(2)}   MBON ${Number(activity.MBON || 0).toFixed(2)}`, 1540, 967, 10, palette.pale);
   write(ctx, `RENDER ${renderedFps.toFixed(0)} FPS`, 1540, 996, 9, renderedFps < 24 ? palette.amber : palette.muted);
 
-  if (event.action !== "no_op" && phase > 0.68) {
+  panel(620, 908, 680, 108, "HOMEOSTATIC DRIVE · REAL PYTHON STATE");
+  const drive = event.drive || {};
+  const threshold = Number(drive.threshold || config.drive_threshold || 1);
+  let shownDrive = Number(drive.current || 0);
+  if (drive.relieved) {
+    const reliefPhase = Math.max(0, Math.min(1, (phase - 0.58) / 0.2));
+    shownDrive = Number(drive.relief_before)
+      + (Number(drive.relief_after) - Number(drive.relief_before)) * reliefPhase;
+  }
+  const driveRatio = Math.max(0, Math.min(1.2, shownDrive / threshold));
+  ctx.fillStyle = "rgba(71,91,112,0.46)";
+  ctx.fillRect(646, 956, 628, 14);
+  const driveGradient = ctx.createLinearGradient(646, 0, 1274, 0);
+  driveGradient.addColorStop(0, palette.violet);
+  driveGradient.addColorStop(0.72, palette.magenta);
+  driveGradient.addColorStop(1, palette.amber);
+  ctx.fillStyle = driveGradient;
+  ctx.fillRect(646, 956, 628 * Math.min(1, driveRatio), 14);
+  ctx.strokeStyle = palette.pale;
+  ctx.beginPath(); ctx.moveTo(1274, 950); ctx.lineTo(1274, 977); ctx.stroke();
+  write(ctx, `${drive.host_id?.toUpperCase() || "NO HOST"}  ${shownDrive.toFixed(3)} / ${threshold.toFixed(2)}`, 646, 990, 11, driveRatio >= 1 ? palette.amber : palette.pale, "left", 700);
+  write(ctx, `INPUT ${Number(drive.stimulation || 0).toFixed(3)}  WINDOW ${Number(drive.windowed_stimulation || 0).toFixed(3)}`, 1274, 990, 9, palette.muted, "right", 600);
+
+  if (drive.relieved && phase > 0.58) {
+    const reliefPulse = 0.5 + 0.5 * Math.sin((phase - 0.58) * Math.PI * 7);
+    orb(ctx, 960, 860, 24 + reliefPulse * 20, palette.amber, 0.42);
+    write(ctx, "ACTION FIRED · PRESSURE RELIEVED", 960, 866, 18, palette.amber, "center", 800);
+  } else if (event.action !== "no_op" && phase > 0.68) {
     write(ctx, "DEFENSIVE SIGNAL RELEASED", 960, 880, 18, palette.amber, "center", 800);
   } else if (event.reflex.ascend && phase > 0.32) {
     write(ctx, "UNCERTAIN PATTERN · BRIAN2 NETWORK RUNNING", 960, 880, 13, palette.magenta, "center", 700);
@@ -499,6 +543,17 @@ function drawFrame(now) {
   drawHostNetwork(currentEvent, phase);
   drawSignals(currentEvent, phase);
   drawHud(currentEvent, phase, now);
+
+  if (
+    autoCapture
+    && !autoCaptureStopping
+    && currentEvent.drive?.relieved
+    && phase > 0.96
+    && recorder?.state === "recording"
+  ) {
+    autoCaptureStopping = true;
+    recorder.stop();
+  }
 
   const frameTime = performance.now() - frameStarted;
   frameSamples.push(frameTime);
@@ -559,7 +614,7 @@ fullscreenButton.addEventListener("click", () => {
   else document.body.requestFullscreen();
 });
 
-recordButton.addEventListener("click", () => {
+function startRecording() {
   if (recorder?.state === "recording") {
     recorder.stop();
     return;
@@ -576,7 +631,9 @@ recordButton.addEventListener("click", () => {
     const blob = new Blob(recordedChunks, { type: recorder.mimeType || "video/webm" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = "drosophila-sentinel-live.webm";
+    link.download = autoCapture
+      ? "drosophila-sentinel-drive-cycle.webm"
+      : "drosophila-sentinel-live.webm";
     link.click();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
     recordButton.textContent = "Record WebM";
@@ -586,13 +643,16 @@ recordButton.addEventListener("click", () => {
   startLiveRun();
   recordButton.textContent = "Stop + save";
   statusText.textContent = "● Recording new live run";
-});
+}
+
+recordButton.addEventListener("click", startRecording);
 
 config = window.SENTINEL_LIVE_CONFIG;
 if (config) {
   layout = buildLayout(config.graph);
   prepareLayers();
-  startLiveRun();
+  if (autoCapture) startRecording();
+  else startLiveRun();
 } else {
   streamState = "error";
   streamMessage = "Simulation configuration unavailable";

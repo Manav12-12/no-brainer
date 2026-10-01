@@ -13,6 +13,7 @@ from sentinel.jev.cache import DecisionCache, cache_key
 from sentinel.jev.interface import DecisionResult, QuestionResult
 from sentinel.jev.replay_backend import ReplayBackend
 from sentinel.orchestrator.descending import adjust_reflex_threshold
+from sentinel.orchestrator.drive import DriveParameters, HomeostaticDrive
 from sentinel.orchestrator.escalation import escalate_to_brain
 from sentinel.orchestrator.feedback import analyst_oracle, apply_episode_feedback
 from sentinel.orchestrator.reflex_arc import REFLEX_SPEC, evaluate_reflex
@@ -67,6 +68,14 @@ def test_reflex_act_and_ascend_paths(tmp_path: Path) -> None:
     uncertain = evaluate_reflex(cached_backend(other, 0.55, 0.6), state, 0.8)
     assert uncertain.ascend and uncertain.available
 
+    calibrated = tmp_path / "calibrated"
+    calibrated.mkdir()
+    empirical = evaluate_reflex(
+        cached_backend(calibrated, 0.30, 0.30), state, 0.28, 0.27
+    )
+    assert empirical.action == DefensiveAction.ISOLATE_HOST
+    assert not empirical.ascend
+
 
 @pytest.mark.integration
 def test_replay_miss_degrades_to_brain(tmp_path: Path) -> None:
@@ -93,3 +102,35 @@ def test_descending_feedback_loop_is_bounded() -> None:
     assert np.array_equal(updated, np.full((2, 1), 0.1))
     injury = analyst_oracle(False, DefensiveAction.ISOLATE_HOST)
     assert not injury.correct and injury.reward == -1
+
+
+@pytest.mark.integration
+def test_action_stops_attack_telemetry_and_relieves_drive() -> None:
+    from sentinel.cyberbody.env import CyberRange
+
+    environment = CyberRange(12, 8, 1729)
+    drive = HomeostaticDrive(
+        DriveParameters(
+            window=3,
+            decay=0.9,
+            gain=1.0,
+            stimulation_floor=0.0,
+            threshold=0.8,
+            relief_fraction=0.2,
+        )
+    )
+    first = environment.observe()
+    second = environment.observe()
+    assert second.attacker.stage.value == "initial_access"
+    host_id = second.host_id
+    drive.observe(host_id, 1.0)
+    crossing = drive.observe(host_id, 1.0)
+    assert crossing.current > crossing.previous
+    before, relieved = drive.relieve(host_id)
+    environment.act(DefensiveAction.ISOLATE_HOST, host_id)
+    contained = environment.observe()
+    assert contained.attacker.stage.value == "contained"
+    after = drive.observe(host_id, 0.0)
+    assert relieved < before
+    assert after.current < relieved
+    assert first.attacker.stage.value == "recon"

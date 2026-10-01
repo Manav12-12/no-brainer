@@ -46,9 +46,10 @@ def evaluate_reflex(
     model: DecisionModel,
     state: dict[str, JsonValue],
     tau_reflex: float,
+    known_pattern_threshold: float = 0.5,
 ) -> ReflexDecision:
-    if not 0 <= tau_reflex <= 1:
-        raise ValueError("reflex threshold must be between zero and one")
+    if not 0 <= tau_reflex <= 1 or not 0 <= known_pattern_threshold <= 1:
+        raise ValueError("reflex thresholds must be between zero and one")
     try:
         result = model.decide(state, REFLEX_SPEC)
     except (DecisionUnavailable, KeyError, ValueError) as error:
@@ -61,7 +62,14 @@ def evaluate_reflex(
         return ReflexDecision(None, True, True, 0.0, "missing_action_confidence")
     confidence = min(known_confidence, action_confidence)
     selected = action_answer.selected
-    if known >= 0.5 and confidence >= tau_reflex and isinstance(selected, str):
+    # Jev 1.13.0 emitted known-pattern probabilities in [0.20, 0.38] on the
+    # cached UNSW sample. Keep this boundary explicit and externally tuned;
+    # 0.5 is not a model-independent semantic cutoff for a `noul` response.
+    if (
+        known >= known_pattern_threshold
+        and confidence >= tau_reflex
+        and isinstance(selected, str)
+    ):
         try:
             action = DefensiveAction(selected)
         except ValueError:

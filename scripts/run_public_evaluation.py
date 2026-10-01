@@ -9,6 +9,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from sentinel.brain.plasticity import train_kc_mbon_weights
+from sentinel.config import JevConfig, load_yaml
 from sentinel.connectome.loader import synthetic_connectome
 from sentinel.cyberbody.actions import DefensiveAction
 from sentinel.data.features import FEATURE_NAMES, FeaturePipeline, serialize_features
@@ -27,6 +29,8 @@ def transform(pipeline: FeaturePipeline, frame: pd.DataFrame) -> pd.DataFrame:
 
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
+    jev_config = JevConfig.model_validate(load_yaml(root / "configs/jev.yaml"))
+    brain_config = load_yaml(root / "configs/brain_mb_subnet.yaml")
     source = root / "data/public/unsw_nb15_v3/processed.parquet"
     frame = load_processed(source, synthetic_expected=False)
     split = family_holdout_split(frame, "worms")
@@ -41,13 +45,30 @@ def main() -> None:
     isolation = IsolationBaseline(1729).fit(benign)
     autoencoder = AutoencoderBaseline(1729).fit(benign, epochs=5)
     graph = synthetic_connectome(1729)
+    plasticity_examples = int(brain_config["plasticity_examples"])
+    benign_indices = np.flatnonzero(y_train == 0)[: plasticity_examples // 2]
+    attack_indices = np.flatnonzero(y_train == 1)[: plasticity_examples // 2]
+    plasticity_indices = np.concatenate([benign_indices, attack_indices])
+    plasticity_report = train_kc_mbon_weights(
+        graph,
+        x_train[plasticity_indices],
+        y_train[plasticity_indices],
+        duration_ms=float(brain_config["simulation_ms"]),
+        random_seed=20_000,
+        learning_rate=float(brain_config["plasticity_learning_rate"]),
+    )
     set_global_seed(1729)
     rows: list[dict[str, Any]] = []
     first_action: int | None = None
     for event_index, (_, event) in enumerate(test.iterrows()):
         state = serialize_features(event)
         started = time.perf_counter()
-        reflex = evaluate_reflex(local, state, 0.8)
+        reflex = evaluate_reflex(
+            local,
+            state,
+            jev_config.reflex_confidence_threshold,
+            jev_config.known_pattern_threshold,
+        )
         reflex_action = reflex.action or DefensiveAction.NO_OP
         final_action = reflex_action
         values = event.loc[list(FEATURE_NAMES)].to_numpy(dtype=np.float64)
@@ -56,7 +77,7 @@ def main() -> None:
                 graph,
                 values,
                 1729 + event_index,
-                15.0,
+                float(brain_config["simulation_ms"]),
             )
         latency_ms = (time.perf_counter() - started) * 1000
         baseline_action = bool(isolation.detect(values) or autoencoder.detect(values))
@@ -108,6 +129,12 @@ def main() -> None:
         "git_commit": commit,
         "synthetic_mode": False,
         "event_records": rows,
+        "plasticity": {
+            "examples": plasticity_report.examples,
+            "updated_edges": plasticity_report.updated_edges,
+            "l1_weight_delta": plasticity_report.l1_weight_delta,
+            "evaluation_weights": "trained",
+        },
     }
     destination = root / "artifacts/public-dataset-eval.json"
     destination.write_text(

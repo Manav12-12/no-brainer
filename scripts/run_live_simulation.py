@@ -11,17 +11,22 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
 from sentinel.brain.encoder import SensoryEncoder
 from sentinel.brain.lif_model import LIFParameters, simulate_lif
+from sentinel.brain.plasticity import train_kc_mbon_weights
 from sentinel.brain.readout import brain_readout
+from sentinel.config import JevConfig, load_yaml
 from sentinel.connectome.annotations import population_ids
 from sentinel.connectome.loader import synthetic_connectome
 from sentinel.cyberbody.actions import DefensiveAction
 from sentinel.cyberbody.env import CyberRange
 from sentinel.data.features import FEATURE_NAMES, FeaturePipeline, serialize_vector
 from sentinel.data.synthetic import generate_synthetic_events
-from sentinel.jev.local_backend import LocalBackend
+from sentinel.jev.cache import DecisionCache
+from sentinel.jev.replay_backend import ReplayBackend
+from sentinel.orchestrator.drive import DriveParameters, HomeostaticDrive
 from sentinel.orchestrator.reflex_arc import evaluate_reflex
 from sentinel.seed import set_global_seed
 
@@ -30,13 +35,13 @@ EPISODE_SEED_OFFSETS = (0, 13, 29)
 STEPS_PER_EPISODE = 8
 
 
-def train_local_model(seed: int) -> LocalBackend:
+def training_data(seed: int) -> tuple[NDArray[np.float64], NDArray[np.int64]]:
     training = generate_synthetic_events(800, seed)
     pipeline = FeaturePipeline.create().fit(training)
     transformed = pipeline.transform(training)
     values = transformed.loc[:, FEATURE_NAMES].to_numpy(dtype=np.float64)
     labels = transformed["label"].to_numpy(dtype=np.int64)
-    return LocalBackend().fit(values, labels)
+    return values, labels
 
 
 def graph_payload(seed: int) -> tuple[Any, dict[str, Any]]:
@@ -59,6 +64,8 @@ def graph_payload(seed: int) -> tuple[Any, dict[str, Any]]:
 
 def simulation_config(seed: int) -> dict[str, Any]:
     _, graph = graph_payload(seed)
+    root = Path(__file__).resolve().parents[1]
+    brain_config = load_yaml(root / "configs/brain_mb_subnet.yaml")
     return {
         "title": "Drosophila Sentinel",
         "seed": seed,
@@ -68,6 +75,7 @@ def simulation_config(seed: int) -> dict[str, Any]:
         "episodes": len(EPISODE_SEED_OFFSETS),
         "steps_per_episode": STEPS_PER_EPISODE,
         "total_steps": len(EPISODE_SEED_OFFSETS) * STEPS_PER_EPISODE,
+        "drive_threshold": float(brain_config["drive_threshold"]),
         "graph": graph,
     }
 
@@ -83,6 +91,10 @@ def event_payload(
     action: DefensiveAction,
     outcome: Any,
     environment: CyberRange,
+    drive: HomeostaticDrive,
+    drive_observation: Any,
+    relief: tuple[float, float] | None,
+    action_source: str,
     compute_ms: float,
 ) -> dict[str, Any]:
     return {
@@ -105,6 +117,8 @@ def event_payload(
         if brain is None
         else {
             "novelty": brain.novelty_score,
+            "sensory_stimulation": brain.sensory_stimulation,
+            "drive_stimulation": brain.drive_stimulation,
             "threat_class": brain.threat_class,
             "population_activity": brain.population_activity,
             "active_nodes": [
@@ -115,6 +129,20 @@ def event_payload(
             "total_spikes": sum(counts.values()),
         },
         "action": action.value,
+        "action_source": action_source,
+        "drive": {
+            "host_id": observation.host_id,
+            "previous": drive_observation.previous,
+            "before_action": drive_observation.current,
+            "current": drive.value(observation.host_id),
+            "threshold": drive_observation.threshold,
+            "stimulation": drive_observation.stimulation,
+            "windowed_stimulation": drive_observation.windowed_stimulation,
+            "crossed": drive_observation.crossed,
+            "relieved": relief is not None,
+            "relief_before": relief[0] if relief is not None else None,
+            "relief_after": relief[1] if relief is not None else None,
+        },
         "outcome": None
         if outcome is None
         else {
@@ -131,6 +159,7 @@ def event_payload(
                 "isolated": host.isolated,
                 "rate_limited": host.rate_limited,
                 "session_active": host.session_active,
+                "drive": drive.value(host.host_id),
             }
             for host in environment.hosts.values()
         ],
@@ -139,9 +168,40 @@ def event_payload(
 
 def simulation_events(seed: int = 1729) -> Iterator[dict[str, Any]]:
     set_global_seed(seed)
-    yield {"type": "status", "state": "training", "message": "Fitting reflex model"}
-    model = train_local_model(seed)
+    root = Path(__file__).resolve().parents[1]
+    jev_config = JevConfig.model_validate(load_yaml(root / "configs/jev.yaml"))
+    brain_config = load_yaml(root / "configs/brain_mb_subnet.yaml")
+    yield {
+        "type": "status",
+        "state": "training",
+        "message": "Training KC→MBON weights",
+    }
+    values, labels = training_data(seed)
+    benign = np.flatnonzero(labels == 0)[:16]
+    attack = np.flatnonzero(labels == 1)[:16]
+    selected = np.concatenate([benign, attack])
     graph, _ = graph_payload(seed)
+    train_kc_mbon_weights(
+        graph,
+        values[selected],
+        labels[selected],
+        duration_ms=float(brain_config["simulation_ms"]),
+        random_seed=seed + 20_000,
+        learning_rate=float(brain_config["plasticity_learning_rate"]),
+    )
+    model = ReplayBackend(
+        DecisionCache(root / jev_config.cache_path),
+        jev_config.model_id,
+        jev_config.serialization_version,
+    )
+    drive_parameters = DriveParameters(
+        window=int(brain_config["drive_window"]),
+        decay=float(brain_config["drive_decay"]),
+        gain=float(brain_config["drive_gain"]),
+        stimulation_floor=float(brain_config["drive_stimulation_floor"]),
+        threshold=float(brain_config["drive_threshold"]),
+        relief_fraction=float(brain_config["drive_relief_fraction"]),
+    )
     sensory_nodes = population_ids(graph, "ORN")
     encoder = SensoryEncoder(len(sensory_nodes))
     parameters = LIFParameters()
@@ -151,6 +211,7 @@ def simulation_events(seed: int = 1729) -> Iterator[dict[str, Any]]:
     for episode, offset in enumerate(EPISODE_SEED_OFFSETS, start=1):
         episode_seed = seed + offset
         environment = CyberRange(12, STEPS_PER_EPISODE, episode_seed)
+        drive = HomeostaticDrive(drive_parameters)
         for _ in range(STEPS_PER_EPISODE):
             started = time.perf_counter()
             observation = environment.observe()
@@ -160,29 +221,45 @@ def simulation_events(seed: int = 1729) -> Iterator[dict[str, Any]]:
                 segment=observation.segment,
                 recent_event_count=observation.step,
             )
-            reflex = evaluate_reflex(model, state, 0.8)
+            reflex = evaluate_reflex(
+                model,
+                state,
+                jev_config.reflex_confidence_threshold,
+                jev_config.known_pattern_threshold,
+            )
             counts: dict[int, int] = {}
             brain = None
             action = reflex.action or DefensiveAction.NO_OP
+            action_source = "reflex" if reflex.action is not None else "none"
             if reflex.ascend:
                 rates = encoder.encode(observation.features)
                 counts = simulate_lif(
                     graph,
                     sensory_nodes,
                     rates,
-                    20.0,
+                    float(brain_config["simulation_ms"]),
                     parameters,
                     episode_seed + observation.step,
                 )
-                brain = brain_readout(graph, counts)
-                try:
-                    action = DefensiveAction(brain.action)
-                except ValueError:
-                    action = DefensiveAction.NO_OP
+                brain = brain_readout(graph, counts, rates)
+                drive_observation = drive.observe(
+                    observation.host_id, brain.drive_stimulation
+                )
+                if (
+                    drive_observation.current >= drive_observation.threshold
+                    and not environment.hosts[observation.host_id].isolated
+                ):
+                    action = DefensiveAction.ISOLATE_HOST
+                    action_source = "drive"
+            else:
+                drive_observation = drive.observe(observation.host_id, 0.0)
 
             outcome = None
+            relief = None
             if action != DefensiveAction.NO_OP:
                 outcome = environment.act(action, observation.host_id)
+                if action_source == "drive":
+                    relief = drive.relieve(observation.host_id)
             compute_ms = (time.perf_counter() - started) * 1000
             yield event_payload(
                 global_step=global_step,
@@ -194,6 +271,10 @@ def simulation_events(seed: int = 1729) -> Iterator[dict[str, Any]]:
                 action=action,
                 outcome=outcome,
                 environment=environment,
+                drive=drive,
+                drive_observation=drive_observation,
+                relief=relief,
+                action_source=action_source,
                 compute_ms=compute_ms,
             )
             global_step += 1
