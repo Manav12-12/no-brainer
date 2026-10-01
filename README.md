@@ -11,11 +11,19 @@ local and live Jev decisions, synthetic-connectome experiments, a full FlyWire
 v783 execution check, held-out attack-family evaluation, and a live browser
 visualization driven by Python simulation events.
 
-The current engineering result is a working closed loop: sustained anomalous
-stimulation raises per-host drive, drive triggers simulated isolation, the
-attacker transitions to `contained`, and subsequent drive falls. The result is
-not evidence that fly-connectome topology improves intrusion detection:
-shuffled and random controls also contained every held-out synthetic episode.
+The main result is a working closed loop. Sustained stimulation raises per-host
+drive, the controller takes a simulated defensive action, the attacker enters
+the `contained` state, and drive falls after relief. On 10 attack and 10 benign
+synthetic validation episodes, this sequential controller detected every attack
+episode, produced no benign-episode false actions, and contained attacks at mean
+step 9.0.
+
+That episode-level result is separate from record-level detection quality. On
+the mixed benchmark, the combined system reached ROC-AUC 0.734 versus 0.725 for
+the standard anomaly baseline, but its selected F1 was lower, 0.692 versus
+0.712, with a 70% false-positive rate. Shuffled and random graph controls
+matched or beat the intended topology. The project demonstrates an audited
+control architecture, not a better detector or a fly-connectome advantage.
 
 ## How it works
 
@@ -50,6 +58,22 @@ visualization binds to `127.0.0.1`, receives each event as Python computes it,
 and never calls Jev.
 
 ## Measured results
+
+### Sequential closed-loop validation
+
+| Metric | Result |
+| --- | ---: |
+| Attack episodes detected | 10/10 |
+| Benign episodes with false actions | 0/10 |
+| Mean containment step | 9.0 |
+| Drive window | 3 events |
+| Action threshold | 1.0 |
+
+This is synthetic, episode-level validation of stimulus buildup, action,
+containment, and relief. It is not the record-level mixed benchmark below.
+
+The final audit also found an inverted pain-extraction score. Correcting it
+raised validation ROC-AUC from 0.373 to 0.641.
 
 ### Historical pain-only closed-loop evaluation
 
@@ -188,13 +212,21 @@ verifies available manifests, and runs the offline smoke test.
 
 ## Run the live simulation
 
+For the shortest demo path after setup:
+
 ```bash
 make live
 ```
 
 The command opens `http://127.0.0.1:8765`. Python fits the local reflex model,
-    trains KC-to-MBON weights, runs the cyber-range, and executes Brian2 one event at a time. Each completed
-event streams directly to the browser. The display shows:
+trains KC-to-MBON weights, runs the cyber-range, and executes Brian2 one event
+at a time. Each completed event streams directly to the browser. No API key or
+live Jev call is required.
+
+During the demo, watch the `HOMEOSTATIC DRIVE` bar. It accumulates stimulation
+for each host, crosses the configured threshold, triggers a simulated action,
+and drops after relief. Click `New live run` to restart with the same
+deterministic seed. The display also shows:
 
 - optic lobes, central brain volume, mushroom bodies, and central complex;
 - the descending pathway and segmented ventral nerve cord;
@@ -220,6 +252,12 @@ ffmpeg -i drosophila-sentinel-live.webm -c:v libx264 \
 ```
 
 Press `Ctrl+C` in the terminal to stop the local server.
+
+If port 8765 is occupied, run:
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/run_live_simulation.py --port 8877
+```
 
 ## Run the engineering paths
 
@@ -312,6 +350,11 @@ here.
   distribution. Its locked cache partition detected 7% with 0% false actions.
 - The 48-node graph is an engineering proxy. Its aggregate edge weight is based
   on a FlyWire asset statistic, not identified biological ORN/PN pathways.
-- B2 through B5 did not establish superiority over shuffled or random controls.
-  The shared sensory-pressure component is sufficient to drive B5 despite its
-  missing KC-to-MBON training edges.
+- Shuffled and random controls consistently matched or outperformed the intended
+  topology. The completed experiments show no connectome-specific benefit.
+- KC-to-MBON learning added about 0.008 validation ROC-AUC over the untrained
+  dual-input graph. Most combined value came from the anomaly input.
+- The mixed partition had prior aggregate gate reporting, and its host roles and
+  segments are synthetic. It is not pristine operational traffic.
+- The semantically named Jev payload remains unmeasured because it has no cache
+  coverage and requires new authenticated calls.

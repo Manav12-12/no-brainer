@@ -92,6 +92,61 @@ Final metrics and threshold curves are locked in
 `artifacts/kc-learning-validation.json`. No further threshold tuning,
 KC-to-MBON training, or held-out evaluation is part of the final result.
 
+## Demo guide
+
+The live demo uses the local model and cached assets. It does not need a Jev API
+key and makes no live Jev request.
+
+### First-time setup
+
+```bash
+git clone git@github.com:Manav12-12/no-brainer.git
+cd no-brainer
+./scripts/fetch_offline_assets.sh --runtime-only
+make setup
+```
+
+### Start the demo
+
+```bash
+make live
+```
+
+The command opens `http://127.0.0.1:8765`. If the browser does not open, visit
+that address manually. Press `Ctrl+C` in the terminal to stop the server.
+
+For a different port or a machine where automatic browser launch is unwanted:
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/run_live_simulation.py \
+  --port 8877 --no-open
+```
+
+### What to show
+
+1. Start a new live run and point out that Python emits each event over
+   server-sent events.
+2. Show the reflex pain value and measured Brian2 spikes changing as events
+   arrive.
+3. Follow one host's `HOMEOSTATIC DRIVE` bar as pressure accumulates.
+4. Show the threshold crossing, simulated defensive action, attacker transition
+   to `contained`, and immediate pressure relief.
+5. End with the control result: shuffled and random graphs matched or beat the
+   intended topology. The demo proves the closed-loop controller, not a
+   connectome-specific detection advantage.
+
+Use `New live run` to restart. `Fullscreen` prepares a clean presentation view.
+`Record WebM` starts a fresh run and records the 1920 by 1080 canvas. Use
+`Stop + save` to download it.
+
+### Troubleshooting
+
+- If dependencies are missing, run `make setup` again.
+- If port 8765 is busy, use the alternate-port command above.
+- If the browser remains blank, keep the terminal open and reload the local
+  page after the server prints `Live simulation ready`.
+- Do not export `TYPESAFE_API_KEY` for this demo. The local path is deliberate.
+
 ## Security posture
 
 - network sockets are blocked during normal tests;
