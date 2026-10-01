@@ -49,7 +49,7 @@ def test_controls_ablation_grid_and_report(tmp_path: Path) -> None:
             "false_action_rate": 0.1,
             "injuries": 1,
             "reflex_fraction": 0.5,
-            "ascend_fraction": 0.5,
+            "brain_fraction": 0.5,
             "jev_failures": 0,
             "mean_layer_latency_ms": 1.0,
         }
@@ -59,4 +59,4 @@ def test_controls_ablation_grid_and_report(tmp_path: Path) -> None:
     assert (tmp_path / "episodes.json").exists()
     assert (tmp_path / "detection_rate.png").exists()
     assert (tmp_path / "summary.json").exists()
-    assert (tmp_path / "reflex_vs_ascend.png").exists()
+    assert (tmp_path / "reflex_vs_brain.png").exists()

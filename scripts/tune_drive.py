@@ -7,13 +7,16 @@ from typing import Any
 import numpy as np
 
 from sentinel.brain.plasticity import train_kc_mbon_weights
-from sentinel.brain.runner import run_brain
+from sentinel.brain.runner import run_brain_from_pain
+from sentinel.config import JevConfig, load_yaml
 from sentinel.connectome.loader import synthetic_connectome
 from sentinel.cyberbody.attacker import KillChainStage
 from sentinel.cyberbody.env import CyberRange
-from sentinel.data.features import FEATURE_NAMES, FeaturePipeline
+from sentinel.data.features import FEATURE_NAMES, FeaturePipeline, serialize_vector
 from sentinel.data.synthetic import generate_synthetic_events
+from sentinel.jev.local_backend import LocalBackend
 from sentinel.orchestrator.drive import DriveParameters, HomeostaticDrive
+from sentinel.orchestrator.reflex_arc import evaluate_reflex
 
 
 def validation_traces(root: Path) -> list[dict[str, Any]]:
@@ -22,6 +25,8 @@ def validation_traces(root: Path) -> list[dict[str, Any]]:
     transformed = pipeline.transform(training)
     values = transformed.loc[:, FEATURE_NAMES].to_numpy(dtype=np.float64)
     labels = transformed["label"].to_numpy(dtype=np.int64)
+    reflex_model = LocalBackend().fit(values, labels)
+    jev_config = JevConfig.model_validate(load_yaml(root / "configs/jev.yaml"))
     selected = np.concatenate(
         [np.flatnonzero(labels == 0)[:16], np.flatnonzero(labels == 1)[:16]]
     )
@@ -42,9 +47,21 @@ def validation_traces(root: Path) -> list[dict[str, Any]]:
             events = []
             for _ in range(16):
                 observation = environment.observe()
-                brain = run_brain(
-                    graph,
+                state = serialize_vector(
                     observation.features,
+                    host_role=observation.host_role,
+                    segment=observation.segment,
+                    recent_event_count=observation.step,
+                )
+                reflex = evaluate_reflex(
+                    reflex_model,
+                    state,
+                    jev_config.reflex_confidence_threshold,
+                    jev_config.known_pattern_threshold,
+                )
+                brain, _ = run_brain_from_pain(
+                    graph,
+                    reflex.pain_signal,
                     seed + observation.step,
                     duration_ms=50.0,
                 )
@@ -55,6 +72,7 @@ def validation_traces(root: Path) -> list[dict[str, Any]]:
                 events.append(
                     {
                         "host_id": observation.host_id,
+                        "pain_signal": reflex.pain_signal,
                         "novelty": brain.novelty_score,
                         "drive_stimulation": brain.drive_stimulation,
                         "attacked": attacked,

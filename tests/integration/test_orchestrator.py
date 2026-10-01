@@ -7,6 +7,7 @@ import pytest
 
 from sentinel.connectome.loader import synthetic_connectome
 from sentinel.cyberbody.actions import DefensiveAction
+from sentinel.cyberbody.topology import build_topology
 from sentinel.data.features import FeaturePipeline, serialize_features
 from sentinel.data.synthetic import generate_synthetic_events
 from sentinel.jev.cache import DecisionCache, cache_key
@@ -17,6 +18,7 @@ from sentinel.orchestrator.drive import DriveParameters, HomeostaticDrive
 from sentinel.orchestrator.escalation import escalate_to_brain
 from sentinel.orchestrator.feedback import analyst_oracle, apply_episode_feedback
 from sentinel.orchestrator.reflex_arc import REFLEX_SPEC, evaluate_reflex
+from sentinel.orchestrator.strategy import select_response_strategy
 
 
 def feature_state() -> dict[str, object]:
@@ -61,12 +63,13 @@ def test_reflex_act_and_ascend_paths(tmp_path: Path) -> None:
     state = feature_state()
     immediate = evaluate_reflex(cached_backend(tmp_path, 0.95, 0.9), state, 0.8)
     assert immediate.action == DefensiveAction.ISOLATE_HOST
-    assert not immediate.ascend
+    assert immediate.pain_signal > 0.9
 
     other = tmp_path / "other"
     other.mkdir()
     uncertain = evaluate_reflex(cached_backend(other, 0.55, 0.6), state, 0.8)
-    assert uncertain.ascend and uncertain.available
+    assert uncertain.action is None and uncertain.available
+    assert uncertain.pain_signal > 0.7
 
     calibrated = tmp_path / "calibrated"
     calibrated.mkdir()
@@ -74,11 +77,11 @@ def test_reflex_act_and_ascend_paths(tmp_path: Path) -> None:
         cached_backend(calibrated, 0.30, 0.30), state, 0.28, 0.27
     )
     assert empirical.action == DefensiveAction.ISOLATE_HOST
-    assert not empirical.ascend
+    assert empirical.pain_signal > 0.6
 
 
 @pytest.mark.integration
-def test_replay_miss_degrades_to_brain(tmp_path: Path) -> None:
+def test_replay_miss_emits_explicit_zero_pain(tmp_path: Path) -> None:
     state = feature_state()
     replay = ReplayBackend(
         DecisionCache(tmp_path / "missing.jsonl"),
@@ -86,11 +89,35 @@ def test_replay_miss_degrades_to_brain(tmp_path: Path) -> None:
         "sentinel-features-v1",
     )
     reflex = evaluate_reflex(replay, state, 0.8)
-    assert reflex.ascend and not reflex.available
-    features = np.asarray(state["features"], dtype=np.float64)
-    brain, action = escalate_to_brain(synthetic_connectome(), features, 5, 20)
-    assert action in DefensiveAction
+    assert reflex.pain_signal == 0 and not reflex.available
+    brain, _ = escalate_to_brain(synthetic_connectome(), reflex.pain_signal, 5, 20)
     assert 0 <= brain.novelty_score <= 1
+
+
+@pytest.mark.integration
+def test_brain_strategy_can_coordinate_correlated_hosts() -> None:
+    hosts = build_topology(12)
+    strategy = select_response_strategy(
+        "host-00",
+        hosts,
+        {"host-00": 0.9, "host-03": 0.7},
+        threshold=1.0,
+        reflex_action=DefensiveAction.RATE_LIMIT,
+    )
+    assert strategy.name == "segment_coordination"
+    assert {item.action for item in strategy.directives} == {
+        DefensiveAction.ISOLATE_HOST,
+        DefensiveAction.RATE_LIMIT,
+    }
+    escalation = select_response_strategy(
+        "host-00",
+        hosts,
+        {"host-00": 1.1},
+        threshold=1.0,
+        reflex_action=DefensiveAction.RATE_LIMIT,
+    )
+    assert escalation.name == "escalate_insufficient_reflex"
+    assert escalation.directives[0].action == DefensiveAction.ISOLATE_HOST
 
 
 @pytest.mark.integration

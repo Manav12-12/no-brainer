@@ -34,7 +34,7 @@ def write_results(
                 "false_action_rate",
                 "injuries",
                 "reflex_fraction",
-                "ascend_fraction",
+                "brain_fraction",
                 "jev_failures",
                 "mean_layer_latency_ms",
             )
@@ -57,13 +57,13 @@ def write_results(
     _bar_plot(arms, detection, "Detection rate", output / "detection_rate.png")
     _bar_plot(arms, injuries, "Mean injury count", output / "injury_count.png")
     reflex = [float(summary[arm]["reflex_fraction"]["mean"]) for arm in arms]
-    ascend = [float(summary[arm]["ascend_fraction"]["mean"]) for arm in arms]
+    brain = [float(summary[arm]["brain_fraction"]["mean"]) for arm in arms]
     _grouped_plot(
         arms,
         reflex,
-        ascend,
-        "Reflex and escalation fractions",
-        output / "reflex_vs_ascend.png",
+        brain,
+        "Immediate reflex and brain-processing fractions",
+        output / "reflex_vs_brain.png",
     )
     comparison = [
         float(summary[arm]["detection_rate"]["mean"]) for arm in ("B1", "B1L")
@@ -92,7 +92,7 @@ def _grouped_plot(
     positions = np.arange(len(labels))
     figure, axis = plt.subplots(figsize=(9, 4))
     axis.bar(positions - 0.2, first, 0.4, label="reflex")
-    axis.bar(positions + 0.2, second, 0.4, label="ascended")
+    axis.bar(positions + 0.2, second, 0.4, label="brain processed")
     axis.set_xticks(positions, labels, rotation=45)
     axis.set_title(title)
     axis.legend()

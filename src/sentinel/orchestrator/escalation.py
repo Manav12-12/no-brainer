@@ -1,20 +1,13 @@
 from __future__ import annotations
 
 import networkx as nx
-import numpy as np
-from numpy.typing import NDArray
 
 from sentinel.brain.readout import BrainOutput
-from sentinel.brain.runner import run_brain
-from sentinel.cyberbody.actions import DefensiveAction
+from sentinel.brain.runner import run_brain_from_pain
 
 
 def escalate_to_brain(
-    graph: nx.DiGraph, features: NDArray[np.float64], seed: int, duration_ms: float
-) -> tuple[BrainOutput, DefensiveAction]:
-    output = run_brain(graph, features, seed, duration_ms)
-    try:
-        action = DefensiveAction(output.action)
-    except ValueError:
-        action = DefensiveAction.NO_OP
-    return output, action
+    graph: nx.DiGraph, pain_signal: float, seed: int, duration_ms: float
+) -> tuple[BrainOutput, dict[int, int]]:
+    """Convert the reflex's pain report into neural activity, never an action."""
+    return run_brain_from_pain(graph, pain_signal, seed, duration_ms)

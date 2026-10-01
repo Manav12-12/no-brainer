@@ -398,7 +398,7 @@ function drawSignals(event, phase) {
       7,
     );
   }
-  if (event.reflex.ascend && phase >= 0.3 && phase < 0.82) {
+  if (phase >= 0.3 && phase < 0.82) {
     drawMovingSignal(
       { x: 960, y: 205 },
       { x: 840, y: 480 },
@@ -446,10 +446,14 @@ function drawHud(event, phase, now) {
   write(ctx, `SIM STEP ${String(event.step + 1).padStart(2, "0")}  ·  ${event.compute_ms.toFixed(1)} MS`, 67, 231, 9, palette.muted);
 
   panel(1522, 124, 350, 166, "DECISION PATH");
-  const pathText = event.reflex.ascend ? "BRAIN ESCALATION" : "REFLEX ACTION";
-  write(ctx, pathText, 1540, 170, 19, event.reflex.ascend ? palette.magenta : palette.cyan, "left", 800);
+  const pathText = event.action_source === "reflex"
+    ? "REFLEX + PAIN REPORT"
+    : event.strategy
+      ? "BRAIN STRATEGY"
+      : "PAIN STREAM → BRAIN";
+  write(ctx, pathText, 1540, 170, 17, event.strategy ? palette.amber : palette.magenta, "left", 800);
   write(ctx, `CONFIDENCE ${(event.reflex.confidence * 100).toFixed(1)}%`, 1540, 207, 11, palette.pale);
-  write(ctx, `MEASURED SPIKES ${String(event.brain?.total_spikes || 0).padStart(3, "0")}`, 1540, 233, 11, palette.pale);
+  write(ctx, `PAIN ${Number(event.reflex.pain_signal || 0).toFixed(3)}  ·  SPIKES ${String(event.brain?.total_spikes || 0).padStart(3, "0")}`, 1540, 233, 11, palette.pale);
   write(ctx, `ACTION ${event.action.toUpperCase()}`, 1540, 259, 11, event.action === "no_op" ? palette.muted : palette.amber);
 
   panel(48, 898, 350, 120, "STREAM");
@@ -492,8 +496,8 @@ function drawHud(event, phase, now) {
     write(ctx, "ACTION FIRED · PRESSURE RELIEVED", 960, 866, 18, palette.amber, "center", 800);
   } else if (event.action !== "no_op" && phase > 0.68) {
     write(ctx, "DEFENSIVE SIGNAL RELEASED", 960, 880, 18, palette.amber, "center", 800);
-  } else if (event.reflex.ascend && phase > 0.32) {
-    write(ctx, "UNCERTAIN PATTERN · BRIAN2 NETWORK RUNNING", 960, 880, 13, palette.magenta, "center", 700);
+  } else if (phase > 0.32) {
+    write(ctx, "REFLEX PAIN REPORT · BRIAN2 NETWORK RUNNING", 960, 880, 13, palette.magenta, "center", 700);
   }
 
   ctx.fillStyle = "rgba(69,104,129,0.22)";

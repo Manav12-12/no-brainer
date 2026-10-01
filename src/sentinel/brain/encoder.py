@@ -20,3 +20,13 @@ class SensoryEncoder:
         pooled = np.asarray([float(np.mean(group)) for group in groups])
         rates = self.max_rate_hz / (1.0 + np.exp(-np.clip(pooled, -20, 20)))
         return np.asarray(np.clip(rates, 0.0, self.max_rate_hz), dtype=np.float64)
+
+    def encode_pain(self, pain_signal: float) -> NDArray[np.float64]:
+        """Map a reflex pain scalar to the ORN population's input rates."""
+        if not np.isfinite(pain_signal) or not 0 <= pain_signal <= 1:
+            raise ValueError("pain signal must be finite and between zero and one")
+        return np.full(
+            self.sensory_neurons,
+            pain_signal * self.max_rate_hz,
+            dtype=np.float64,
+        )

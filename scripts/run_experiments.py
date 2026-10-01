@@ -31,6 +31,7 @@ from sentinel.jev.typesafe_backend import TypeSafeBackend
 from sentinel.orchestrator.drive import DriveParameters, HomeostaticDrive
 from sentinel.orchestrator.escalation import escalate_to_brain
 from sentinel.orchestrator.reflex_arc import evaluate_reflex
+from sentinel.orchestrator.strategy import select_response_strategy
 from sentinel.seed import set_global_seed
 
 
@@ -136,10 +137,11 @@ def run_episode(
     attack_events = 0
     detected_attacks = 0
     reflex_handled = 0
-    ascended = 0
+    brain_events = 0
     jev_failures = 0
     layer_latency_ms = 0.0
     contained_at: int | None = None
+    strategy_counts: dict[str, int] = {}
     for _ in range(steps):
         observation = environment.observe()
         attacked = observation.attacker.stage not in {
@@ -153,9 +155,10 @@ def run_episode(
             segment=observation.segment,
             recent_event_count=observation.step,
         )
-        action = DefensiveAction.NO_OP
+        event_acted = False
         started = time.perf_counter()
-        if arm == "B1":
+        reflex = None
+        if arm in {"B1", "B3", "B4", "B5"}:
             reflex = evaluate_reflex(
                 jev,
                 state,
@@ -163,60 +166,61 @@ def run_episode(
                 known_pattern_threshold,
             )
             jev_failures += int(not reflex.available)
-            reflex_handled += int(not reflex.ascend)
-            ascended += int(reflex.ascend)
-            action = reflex.action or DefensiveAction.NO_OP
-        elif arm == "B1L":
+        elif arm in {"B1L", "B2"}:
             reflex = evaluate_reflex(
                 local,
                 state,
                 reflex_confidence_threshold,
                 known_pattern_threshold,
             )
-            reflex_handled += int(not reflex.ascend)
-            ascended += int(reflex.ascend)
-            action = reflex.action or DefensiveAction.NO_OP
-        elif arm in graphs:
-            use_brain = arm != "B3"
-            if arm == "B3":
-                reflex = evaluate_reflex(
-                    jev,
-                    state,
-                    reflex_confidence_threshold,
-                    known_pattern_threshold,
+        if reflex is not None and reflex.action is not None and arm != "B2":
+            environment.act(reflex.action, observation.host_id)
+            actions += 1
+            reflex_handled += 1
+            event_acted = True
+
+        if arm in graphs and reflex is not None:
+            brain_events += 1
+            brain, _ = escalate_to_brain(
+                graphs[arm],
+                reflex.pain_signal,
+                seed + observation.step,
+                brain_duration_ms,
+            )
+            drive_observation = drive.observe(
+                observation.host_id, brain.drive_stimulation
+            )
+            peak_drive = max(peak_drive, drive_observation.current)
+            if drive_observation.current >= drive_observation.threshold:
+                strategy = select_response_strategy(
+                    observation.host_id,
+                    environment.hosts,
+                    drive.values(),
+                    drive_observation.threshold,
+                    reflex.action,
                 )
-                jev_failures += int(not reflex.available)
-                reflex_handled += int(not reflex.ascend)
-                action = reflex.action or DefensiveAction.NO_OP
-                use_brain = reflex.ascend
-            if use_brain:
-                ascended += 1
-                brain, _ = escalate_to_brain(
-                    graphs[arm],
-                    observation.features,
-                    seed + observation.step,
-                    brain_duration_ms,
+                strategy_counts[strategy.name] = (
+                    strategy_counts.get(strategy.name, 0) + 1
                 )
-                drive_observation = drive.observe(
-                    observation.host_id, brain.drive_stimulation
-                )
-                peak_drive = max(peak_drive, drive_observation.current)
-                if (
-                    drive_observation.current >= drive_observation.threshold
-                    and not environment.hosts[observation.host_id].isolated
-                ):
-                    action = DefensiveAction.ISOLATE_HOST
+                strategy_acted = False
+                for directive in strategy.directives:
+                    outcome = environment.act(directive.action, directive.host_id)
+                    if outcome.changed:
+                        actions += 1
+                        strategy_acted = True
+                        event_acted = True
+                if strategy_acted:
                     drive.relieve(observation.host_id)
                     drive_actions += 1
         elif arm == "B6":
             if isolation.detect(observation.features) or autoencoder.detect(
                 observation.features
             ):
-                action = DefensiveAction.ISOLATE_HOST
+                environment.act(DefensiveAction.ISOLATE_HOST, observation.host_id)
+                actions += 1
+                event_acted = True
         layer_latency_ms += (time.perf_counter() - started) * 1000
-        if action != DefensiveAction.NO_OP:
-            actions += 1
-            environment.act(action, observation.host_id)
+        if event_acted:
             detected_attacks += int(attacked)
         if (
             observation.attacker.stage == KillChainStage.CONTAINED
@@ -233,7 +237,7 @@ def run_episode(
         "actions": actions,
         "time_to_contain": contained_at,
         "reflex_fraction": reflex_handled / steps,
-        "ascend_fraction": ascended / steps,
+        "brain_fraction": brain_events / steps,
         "jev_failures": jev_failures,
         "mean_layer_latency_ms": layer_latency_ms / steps,
         "plasticity_examples": plasticity_examples if arm in graphs else 0,
@@ -241,6 +245,7 @@ def run_episode(
         "plasticity_l1_weight_delta": training_delta,
         "drive_actions": drive_actions,
         "peak_drive": peak_drive,
+        "strategy_counts": strategy_counts,
     }
 
 

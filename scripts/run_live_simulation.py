@@ -13,21 +13,18 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from sentinel.brain.encoder import SensoryEncoder
-from sentinel.brain.lif_model import LIFParameters, simulate_lif
 from sentinel.brain.plasticity import train_kc_mbon_weights
-from sentinel.brain.readout import brain_readout
 from sentinel.config import JevConfig, load_yaml
-from sentinel.connectome.annotations import population_ids
 from sentinel.connectome.loader import synthetic_connectome
 from sentinel.cyberbody.actions import DefensiveAction
 from sentinel.cyberbody.env import CyberRange
 from sentinel.data.features import FEATURE_NAMES, FeaturePipeline, serialize_vector
 from sentinel.data.synthetic import generate_synthetic_events
-from sentinel.jev.cache import DecisionCache
-from sentinel.jev.replay_backend import ReplayBackend
+from sentinel.jev.local_backend import LocalBackend
 from sentinel.orchestrator.drive import DriveParameters, HomeostaticDrive
+from sentinel.orchestrator.escalation import escalate_to_brain
 from sentinel.orchestrator.reflex_arc import evaluate_reflex
+from sentinel.orchestrator.strategy import select_response_strategy
 from sentinel.seed import set_global_seed
 
 SIMULATION_LOCK = threading.Lock()
@@ -35,13 +32,15 @@ EPISODE_SEED_OFFSETS = (0, 13, 29)
 STEPS_PER_EPISODE = 8
 
 
-def training_data(seed: int) -> tuple[NDArray[np.float64], NDArray[np.int64]]:
+def training_data(
+    seed: int,
+) -> tuple[NDArray[np.float64], NDArray[np.int64], LocalBackend]:
     training = generate_synthetic_events(800, seed)
     pipeline = FeaturePipeline.create().fit(training)
     transformed = pipeline.transform(training)
     values = transformed.loc[:, FEATURE_NAMES].to_numpy(dtype=np.float64)
     labels = transformed["label"].to_numpy(dtype=np.int64)
-    return values, labels
+    return values, labels, LocalBackend().fit(values, labels)
 
 
 def graph_payload(seed: int) -> tuple[Any, dict[str, Any]]:
@@ -95,6 +94,7 @@ def event_payload(
     drive_observation: Any,
     relief: tuple[float, float] | None,
     action_source: str,
+    strategy_name: str | None,
     compute_ms: float,
 ) -> dict[str, Any]:
     return {
@@ -109,7 +109,7 @@ def event_payload(
         "compute_ms": compute_ms,
         "reflex": {
             "confidence": reflex.confidence,
-            "ascend": reflex.ascend,
+            "pain_signal": reflex.pain_signal,
             "available": reflex.available,
             "reason": reflex.reason,
         },
@@ -130,6 +130,7 @@ def event_payload(
         },
         "action": action.value,
         "action_source": action_source,
+        "strategy": strategy_name,
         "drive": {
             "host_id": observation.host_id,
             "previous": drive_observation.previous,
@@ -176,7 +177,7 @@ def simulation_events(seed: int = 1729) -> Iterator[dict[str, Any]]:
         "state": "training",
         "message": "Training KC→MBON weights",
     }
-    values, labels = training_data(seed)
+    values, labels, model = training_data(seed)
     benign = np.flatnonzero(labels == 0)[:16]
     attack = np.flatnonzero(labels == 1)[:16]
     selected = np.concatenate([benign, attack])
@@ -189,11 +190,6 @@ def simulation_events(seed: int = 1729) -> Iterator[dict[str, Any]]:
         random_seed=seed + 20_000,
         learning_rate=float(brain_config["plasticity_learning_rate"]),
     )
-    model = ReplayBackend(
-        DecisionCache(root / jev_config.cache_path),
-        jev_config.model_id,
-        jev_config.serialization_version,
-    )
     drive_parameters = DriveParameters(
         window=int(brain_config["drive_window"]),
         decay=float(brain_config["drive_decay"]),
@@ -202,9 +198,6 @@ def simulation_events(seed: int = 1729) -> Iterator[dict[str, Any]]:
         threshold=float(brain_config["drive_threshold"]),
         relief_fraction=float(brain_config["drive_relief_fraction"]),
     )
-    sensory_nodes = population_ids(graph, "ORN")
-    encoder = SensoryEncoder(len(sensory_nodes))
-    parameters = LIFParameters()
     global_step = 0
     yield {"type": "status", "state": "running", "message": "Simulation live"}
 
@@ -227,38 +220,43 @@ def simulation_events(seed: int = 1729) -> Iterator[dict[str, Any]]:
                 jev_config.reflex_confidence_threshold,
                 jev_config.known_pattern_threshold,
             )
-            counts: dict[int, int] = {}
-            brain = None
+            brain, counts = escalate_to_brain(
+                graph,
+                reflex.pain_signal,
+                episode_seed + observation.step,
+                float(brain_config["simulation_ms"]),
+            )
             action = reflex.action or DefensiveAction.NO_OP
             action_source = "reflex" if reflex.action is not None else "none"
-            if reflex.ascend:
-                rates = encoder.encode(observation.features)
-                counts = simulate_lif(
-                    graph,
-                    sensory_nodes,
-                    rates,
-                    float(brain_config["simulation_ms"]),
-                    parameters,
-                    episode_seed + observation.step,
-                )
-                brain = brain_readout(graph, counts, rates)
-                drive_observation = drive.observe(
-                    observation.host_id, brain.drive_stimulation
-                )
-                if (
-                    drive_observation.current >= drive_observation.threshold
-                    and not environment.hosts[observation.host_id].isolated
-                ):
-                    action = DefensiveAction.ISOLATE_HOST
-                    action_source = "drive"
-            else:
-                drive_observation = drive.observe(observation.host_id, 0.0)
+            drive_observation = drive.observe(
+                observation.host_id, brain.drive_stimulation
+            )
 
             outcome = None
             relief = None
-            if action != DefensiveAction.NO_OP:
+            strategy_name = None
+            if reflex.action is not None:
                 outcome = environment.act(action, observation.host_id)
-                if action_source == "drive":
+            if drive_observation.current >= drive_observation.threshold:
+                strategy = select_response_strategy(
+                    observation.host_id,
+                    environment.hosts,
+                    drive.values(),
+                    drive_observation.threshold,
+                    reflex.action,
+                )
+                strategy_name = strategy.name
+                strategy_changed = False
+                for directive in strategy.directives:
+                    strategy_outcome = environment.act(
+                        directive.action, directive.host_id
+                    )
+                    if strategy_outcome.changed:
+                        action = directive.action
+                        outcome = strategy_outcome
+                        action_source = "brain_strategy"
+                        strategy_changed = True
+                if strategy_changed:
                     relief = drive.relieve(observation.host_id)
             compute_ms = (time.perf_counter() - started) * 1000
             yield event_payload(
@@ -275,6 +273,7 @@ def simulation_events(seed: int = 1729) -> Iterator[dict[str, Any]]:
                 drive_observation=drive_observation,
                 relief=relief,
                 action_source=action_source,
+                strategy_name=strategy_name,
                 compute_ms=compute_ms,
             )
             global_step += 1

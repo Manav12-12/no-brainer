@@ -12,14 +12,17 @@ import pandas as pd
 from sentinel.brain.plasticity import train_kc_mbon_weights
 from sentinel.config import JevConfig, load_yaml
 from sentinel.connectome.loader import synthetic_connectome
-from sentinel.cyberbody.actions import DefensiveAction
+from sentinel.cyberbody.actions import DefensiveAction, apply_action
+from sentinel.cyberbody.topology import build_topology
 from sentinel.data.features import FEATURE_NAMES, FeaturePipeline, serialize_features
 from sentinel.data.loaders import load_processed
 from sentinel.data.splits import family_holdout_split
 from sentinel.eval.baselines import AutoencoderBaseline, IsolationBaseline
 from sentinel.jev.local_backend import LocalBackend
+from sentinel.orchestrator.drive import DriveParameters, HomeostaticDrive
 from sentinel.orchestrator.escalation import escalate_to_brain
 from sentinel.orchestrator.reflex_arc import evaluate_reflex
+from sentinel.orchestrator.strategy import select_response_strategy
 from sentinel.seed import set_global_seed
 
 
@@ -58,6 +61,17 @@ def main() -> None:
         learning_rate=float(brain_config["plasticity_learning_rate"]),
     )
     set_global_seed(1729)
+    hosts = build_topology(12)
+    drive = HomeostaticDrive(
+        DriveParameters(
+            window=int(brain_config["drive_window"]),
+            decay=float(brain_config["drive_decay"]),
+            gain=float(brain_config["drive_gain"]),
+            stimulation_floor=float(brain_config["drive_stimulation_floor"]),
+            threshold=float(brain_config["drive_threshold"]),
+            relief_fraction=float(brain_config["drive_relief_fraction"]),
+        )
+    )
     rows: list[dict[str, Any]] = []
     first_action: int | None = None
     for event_index, (_, event) in enumerate(test.iterrows()):
@@ -72,13 +86,31 @@ def main() -> None:
         reflex_action = reflex.action or DefensiveAction.NO_OP
         final_action = reflex_action
         values = event.loc[list(FEATURE_NAMES)].to_numpy(dtype=np.float64)
-        if reflex.ascend:
-            _, final_action = escalate_to_brain(
-                graph,
-                values,
-                1729 + event_index,
-                float(brain_config["simulation_ms"]),
+        host_id = f"host-{event_index % len(hosts):02d}"
+        if reflex.action is not None:
+            apply_action(reflex.action, hosts[host_id])
+        brain, _ = escalate_to_brain(
+            graph,
+            reflex.pain_signal,
+            1729 + event_index,
+            float(brain_config["simulation_ms"]),
+        )
+        drive_observation = drive.observe(host_id, brain.drive_stimulation)
+        strategy_name = None
+        if drive_observation.current >= drive_observation.threshold:
+            strategy = select_response_strategy(
+                host_id,
+                hosts,
+                drive.values(),
+                drive_observation.threshold,
+                reflex.action,
             )
+            strategy_name = strategy.name
+            for directive in strategy.directives:
+                outcome = apply_action(directive.action, hosts[directive.host_id])
+                if outcome.changed:
+                    final_action = directive.action
+            drive.relieve(host_id)
         latency_ms = (time.perf_counter() - started) * 1000
         baseline_action = bool(isolation.detect(values) or autoencoder.detect(values))
         acted = final_action != DefensiveAction.NO_OP
@@ -91,7 +123,9 @@ def main() -> None:
                 "label": int(event["label"]),
                 "reflex_action": reflex_action.value,
                 "final_action": final_action.value,
-                "ascended": reflex.ascend,
+                "pain_signal": reflex.pain_signal,
+                "brain_stimulation": brain.drive_stimulation,
+                "strategy": strategy_name,
                 "confidence": reflex.confidence,
                 "pipeline_latency_ms": latency_ms,
                 "baseline_action": baseline_action,
@@ -118,7 +152,7 @@ def main() -> None:
         "held_out_family_absent_from_train": "worms" not in set(train["attack_family"]),
         "pipeline_detection_rate": float(actions.mean()),
         "baseline_detection_rate": float(baseline_actions.mean()),
-        "ascend_fraction": float(np.mean([row["ascended"] for row in rows])),
+        "brain_fraction": 1.0,
         "mean_pipeline_latency_ms": float(latencies.mean()),
         "p95_pipeline_latency_ms": float(np.percentile(latencies, 95)),
         "containment_event_index": first_action,

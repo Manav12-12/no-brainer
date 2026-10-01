@@ -15,7 +15,7 @@ from sentinel.brain.plasticity import (
     train_kc_mbon_weights,
 )
 from sentinel.brain.readout import brain_readout, read_population_activity
-from sentinel.brain.runner import run_brain
+from sentinel.brain.runner import run_brain, run_brain_from_pain
 from sentinel.connectome.annotations import population_ids, require_populations
 from sentinel.connectome.loader import load_connectome, synthetic_connectome
 from sentinel.connectome.subgraph import mushroom_body_subgraph
@@ -55,8 +55,12 @@ def test_encoder_is_finite_and_bounded() -> None:
     assert rates.shape == (8,)
     assert np.isfinite(rates).all()
     assert (rates >= 0).all() and (rates <= 150).all()
+    pain_rates = encoder.encode_pain(0.6)
+    assert np.array_equal(pain_rates, np.full(8, 90.0))
     with pytest.raises(ValueError, match="40"):
         encoder.encode(np.zeros(39))
+    with pytest.raises(ValueError, match="pain"):
+        encoder.encode_pain(1.1)
 
 
 @pytest.mark.unit
@@ -92,6 +96,11 @@ def test_brain_runner_synthetic_mode() -> None:
     output = run_brain(synthetic_connectome(), np.ones(40), 12, duration_ms=20)
     assert 0 <= output.novelty_score <= 1
     assert output.action in {"no_op", "isolate_host"}
+    pain_output, counts = run_brain_from_pain(
+        synthetic_connectome(), 1.0, 12, duration_ms=50
+    )
+    assert pain_output.sensory_stimulation == 1.0
+    assert sum(counts.values()) > 0
 
 
 @pytest.mark.integration

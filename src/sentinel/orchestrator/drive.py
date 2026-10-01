@@ -48,6 +48,9 @@ class HomeostaticDrive:
     def value(self, host_id: str) -> float:
         return self._values[host_id]
 
+    def values(self) -> dict[str, float]:
+        return dict(self._values)
+
     def observe(self, host_id: str, neural_stimulation: float) -> DriveObservation:
         bounded = min(1.0, max(0.0, neural_stimulation))
         stimulation = max(0.0, bounded - self.parameters.stimulation_floor)

@@ -36,7 +36,7 @@ REFLEX_SPEC: DecisionSpec = {
 @dataclass(frozen=True)
 class ReflexDecision:
     action: DefensiveAction | None
-    ascend: bool
+    pain_signal: float
     available: bool
     confidence: float
     reason: str
@@ -53,13 +53,17 @@ def evaluate_reflex(
     try:
         result = model.decide(state, REFLEX_SPEC)
     except (DecisionUnavailable, KeyError, ValueError) as error:
-        return ReflexDecision(None, True, False, 0.0, type(error).__name__)
+        # The upstream channel remains explicit on backend failure. Zero is a
+        # missing-safe signal, not a synthetic classification or network fallback.
+        return ReflexDecision(None, 0.0, False, 0.0, type(error).__name__)
     known = result.answers["known_pattern"].probabilities["true"]
     known_confidence = abs(2 * known - 1)
     action_answer = result.answers["action"]
+    threat_action_probability = 1.0 - action_answer.probabilities.get("no_op", 0.0)
+    pain_signal = min(1.0, max(0.0, (known + threat_action_probability) / 2.0))
     action_confidence = action_answer.confidence
     if action_confidence is None:
-        return ReflexDecision(None, True, True, 0.0, "missing_action_confidence")
+        return ReflexDecision(None, pain_signal, True, 0.0, "missing_action_confidence")
     confidence = min(known_confidence, action_confidence)
     selected = action_answer.selected
     # Jev 1.13.0 emitted known-pattern probabilities in [0.20, 0.38] on the
@@ -69,10 +73,13 @@ def evaluate_reflex(
         known >= known_pattern_threshold
         and confidence >= tau_reflex
         and isinstance(selected, str)
+        and selected != DefensiveAction.NO_OP.value
     ):
         try:
             action = DefensiveAction(selected)
         except ValueError:
-            return ReflexDecision(None, True, True, confidence, "unknown_action")
-        return ReflexDecision(action, False, True, confidence, "known_high_confidence")
-    return ReflexDecision(None, True, True, confidence, "uncertain_or_novel")
+            return ReflexDecision(None, pain_signal, True, confidence, "unknown_action")
+        return ReflexDecision(
+            action, pain_signal, True, confidence, "known_high_confidence"
+        )
+    return ReflexDecision(None, pain_signal, True, confidence, "no_immediate_reflex")

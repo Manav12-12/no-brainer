@@ -85,3 +85,35 @@ floor 0.15, and threshold 0.4 under a 5% false-action cap. Validation reached
 100% episode detection, 0% false actions, and mean containment step 4.7. The
 selection and exact seed ranges are recorded in
 `artifacts/drive-validation.json`; held-out seeds were not used.
+
+## Reflex-to-brain causal architecture
+
+The former controller treated Jev and the brain as mutually exclusive paths:
+a confident reflex bypassed the brain, while an uncertain event caused the
+brain to rescore the original 40 telemetry features. That did not model a
+reflex arc and created two disconnected perceptions of the same event.
+
+`evaluate_reflex()` now emits a bounded pain scalar for every valid response,
+including responses that trigger an immediate reflex action. The scalar is the
+mean of Jev's known-threat probability and its total non-`no_op` action
+probability. An unavailable replay/backend emits an explicit zero with
+`available=False`; it never causes an HTTP fallback or invented classification.
+
+The immediate reflex and upstream pain report are independent. Every event in
+the combined path maps pain directly to ORN rates, propagates it through the
+LIF network, and updates per-host drive. Raw telemetry is no longer passed to
+the brain by the orchestrator. Once drive crosses threshold, the brain selects
+a response strategy from sustained and cross-host state. Available strategies
+include host containment, escalation from a narrower reflex to isolation, and
+coordinated isolation/rate-limiting for correlated hosts in one segment.
+
+```mermaid
+flowchart LR
+    T[Telemetry] --> J[Jev typed reflex evaluation]
+    J -->|immediate action, if confident| R[Reflex actuator]
+    J -->|pain scalar, every event| E[Pain-to-ORN encoder]
+    E --> L[PN → KC → MBON → descending LIF activity]
+    L --> D[Per-host sliding-window drive]
+    D -->|threshold crossed| S[Cross-host response strategy]
+    S --> A[One or more simulated actions]
+```
