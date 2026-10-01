@@ -12,10 +12,15 @@ from sentinel.brain.full_flywire import load_flywire_arrays
 from sentinel.brain.lif_model import LIFParameters, simulate_lif
 from sentinel.brain.plasticity import (
     offline_kc_mbon_update,
+    train_kc_mbon_nociception,
     train_kc_mbon_weights,
 )
 from sentinel.brain.readout import brain_readout, read_population_activity
-from sentinel.brain.runner import run_brain, run_brain_from_pain
+from sentinel.brain.runner import (
+    run_brain,
+    run_brain_from_nociception,
+    run_brain_from_pain,
+)
 from sentinel.connectome.annotations import population_ids, require_populations
 from sentinel.connectome.loader import load_connectome, synthetic_connectome
 from sentinel.connectome.subgraph import mushroom_body_subgraph
@@ -57,6 +62,9 @@ def test_encoder_is_finite_and_bounded() -> None:
     assert (rates >= 0).all() and (rates <= 150).all()
     pain_rates = encoder.encode_pain(0.6)
     assert np.array_equal(pain_rates, np.full(8, 90.0))
+    dual_rates = encoder.encode_nociception(0.2, 0.8)
+    assert np.array_equal(dual_rates[:4], np.full(4, 30.0))
+    assert np.array_equal(dual_rates[4:], np.full(4, 120.0))
     with pytest.raises(ValueError, match="40"):
         encoder.encode(np.zeros(39))
     with pytest.raises(ValueError, match="pain"):
@@ -101,6 +109,10 @@ def test_brain_runner_synthetic_mode() -> None:
     )
     assert pain_output.sensory_stimulation == 1.0
     assert sum(counts.values()) > 0
+    dual_output, _ = run_brain_from_nociception(
+        synthetic_connectome(), 0.4, 0.8, 13, duration_ms=50
+    )
+    assert dual_output.sensory_stimulation == pytest.approx(0.6)
 
 
 @pytest.mark.integration
@@ -121,6 +133,23 @@ def test_plasticity_changes_weights_used_by_brain() -> None:
     assert float(graph.edges[edge]["weight"]) != initial
     output = run_brain(graph, np.full(40, 20.0), 78, duration_ms=50.0)
     assert output.population_activity["MBON"] > 0
+
+
+@pytest.mark.integration
+def test_nociceptive_plasticity_mutates_eligible_edges() -> None:
+    graph = synthetic_connectome()
+    report = train_kc_mbon_nociception(
+        graph,
+        np.asarray([0.2, 0.8]),
+        np.asarray([0.1, 0.9]),
+        np.asarray([0, 1], dtype=np.int64),
+        duration_ms=50.0,
+        random_seed=91,
+        learning_rate=0.05,
+    )
+    assert report.examples == 2
+    assert report.updated_edges == 96
+    assert report.l1_weight_delta > 0
 
 
 @pytest.mark.unit

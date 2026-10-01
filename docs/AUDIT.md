@@ -69,9 +69,9 @@ choice, and no claim is made that this is a biological learning rule.
 
 ## Homeostatic drive
 
-The escalation path now maintains persistent pressure independently for each
-host. Every uncertain event contributes a composite stimulation value made
-from normalized sensory-encoder rate and propagated KC novelty. A three-event
+The controller maintains persistent pressure independently for each host.
+Every event contributes stimulation derived from Jev pain, an independent
+statistical anomaly channel, propagated KC activity, and MBON readout. A three-event
 sliding window feeds a leaky accumulator. An isolation action fires at the
 configured threshold, immediately reduces drive to 15% of its pre-action
 value, and clears the stimulation window. Isolation changes the cyber-range
@@ -79,12 +79,13 @@ state; the attacker then emits `contained` telemetry with no attack offset, so
 subsequent observations continue to reduce drive through decay rather than
 depending only on the immediate reset.
 
-`scripts/tune_drive.py` used 10 attack and 10 benign validation episodes with
-seeds disjoint from evaluation. It selected window 3, decay 0.82, stimulation
-floor 0.15, and threshold 0.4 under a 5% false-action cap. Validation reached
-100% episode detection, 0% false actions, and mean containment step 4.7. The
-selection and exact seed ranges are recorded in
-`artifacts/drive-validation.json`; held-out seeds were not used.
+The original pain-only validation selected window 3, decay 0.82, stimulation
+floor 0.15, and threshold 0.4. Once the independent anomaly channel was added,
+the same validation-only search selected window 3, decay 0.75, stimulation
+floor 0.25, and threshold 1.0 under the precommitted 5% false-action cap. It
+reached 100% episode detection, 0% benign-episode false actions, and mean
+containment step 9.0. `artifacts/drive-validation.json` records the selection;
+held-out seeds were not used.
 
 ## Reflex-to-brain causal architecture
 
@@ -95,8 +96,9 @@ reflex arc and created two disconnected perceptions of the same event.
 
 `evaluate_reflex()` now emits a bounded pain scalar for every valid response,
 including responses that trigger an immediate reflex action. The scalar is the
-mean of Jev's known-threat probability and its total non-`no_op` action
-probability. An unavailable replay/backend emits an explicit zero with
+validation-selected mean of action confidence and one minus known-threat
+probability. The prior formula ranked attacks below benign records (ROC-AUC
+0.373); the revised extraction reached 0.641 on validation. An unavailable backend emits an explicit zero with
 `available=False`; it never causes an HTTP fallback or invented classification.
 
 The immediate reflex and upstream pain report are independent. Every event in
@@ -117,3 +119,21 @@ flowchart LR
     D -->|threshold crossed| S[Cross-host response strategy]
     S --> A[One or more simulated actions]
 ```
+
+## Detection-quality evaluation
+
+The mixed benchmark is the locked half of the 400-record Jev cache: 100 benign
+and 100 malicious records. All cached rows are excluded from B6 training. The
+other cache half is used for score scaling, KC-to-MBON training, and threshold
+selection. Exact thresholds and curves are in
+`artifacts/detection-quality.json`.
+
+The v1 serializer retains the permitted numeric values but removes their source
+names and supplies synthetic context. A semantic v2 candidate has zero cache
+hits and requires 200 new authenticated validation calls. Because no credential
+was available, it remains unmeasured and was not promoted into production.
+
+The combined graph slightly exceeds B6's held-out ROC/PR ranking but has lower
+F1 at its selected threshold. Shuffled and random graphs perform better than
+the intended graph. False-positive rates remain high, and no topology-specific
+or deployment-quality claim is supported.

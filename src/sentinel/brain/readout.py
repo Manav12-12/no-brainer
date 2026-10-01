@@ -38,6 +38,7 @@ def brain_readout(
 ) -> BrainOutput:
     activity = read_population_activity(graph, spike_counts)
     kc = activity["KC"]
+    mbon = activity["MBON"]
     descending = activity["descending"]
     novelty = float(np.clip(kc / 10.0, 0.0, 1.0))
     sensory = 0.0
@@ -48,9 +49,12 @@ def brain_readout(
             if pain_input
             else float(np.clip((normalized_rate - 0.5) / 0.15, 0.0, 1.0))
         )
-    # In the reflex architecture, Jev pain is the primary drive input while
-    # propagated KC activity confirms that the biological path was engaged.
-    drive_stimulation = float(np.clip(0.7 * sensory + 0.3 * novelty, 0.0, 1.0))
+    mbon_signal = float(np.clip(mbon / 5.0, 0.0, 1.0))
+    # Reflex pain remains primary, while KC propagation and the trainable MBON
+    # readout contribute independent downstream evidence.
+    drive_stimulation = float(
+        np.clip(0.55 * sensory + 0.2 * novelty + 0.25 * mbon_signal, 0.0, 1.0)
+    )
     threat_class = "novel" if novelty >= 0.5 else "benign_or_known"
     action = "isolate_host" if descending > 0 else "no_op"
     return BrainOutput(

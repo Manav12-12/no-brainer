@@ -30,3 +30,16 @@ class SensoryEncoder:
             pain_signal * self.max_rate_hz,
             dtype=np.float64,
         )
+
+    def encode_nociception(
+        self, pain_signal: float, anomaly_signal: float
+    ) -> NDArray[np.float64]:
+        """Keep reflex pain and statistical anomaly on separate ORN channels."""
+        signals = np.asarray([pain_signal, anomaly_signal], dtype=np.float64)
+        if not np.isfinite(signals).all() or (signals < 0).any() or (signals > 1).any():
+            raise ValueError("nociceptive signals must be finite and in [0, 1]")
+        split = self.sensory_neurons // 2
+        rates = np.empty(self.sensory_neurons, dtype=np.float64)
+        rates[:split] = pain_signal * self.max_rate_hz
+        rates[split:] = anomaly_signal * self.max_rate_hz
+        return rates

@@ -20,6 +20,9 @@ class IsolationBaseline:
     def detect(self, features: NDArray[np.float64]) -> bool:
         return bool(self.model.predict(features.reshape(1, -1))[0] == -1)
 
+    def score(self, features: NDArray[np.float64]) -> float:
+        return float(-self.model.score_samples(features.reshape(1, -1))[0])
+
 
 class _Autoencoder(nn.Module):
     def __init__(self) -> None:
@@ -50,7 +53,53 @@ class AutoencoderBaseline:
         return self
 
     def detect(self, features: NDArray[np.float64]) -> bool:
+        return self.score(features) > self.threshold
+
+    def score(self, features: NDArray[np.float64]) -> float:
         value = torch.as_tensor(features.reshape(1, -1), dtype=torch.float32)
         with torch.no_grad():
             error = float(torch.mean((self.model(value) - value) ** 2))
-        return error > self.threshold
+        return error
+
+
+class AnomalyEnsemble:
+    """Independent two-model nociceptor calibrated on benign training data."""
+
+    def __init__(self, seed: int) -> None:
+        self.isolation = IsolationBaseline(seed)
+        self.autoencoder = AutoencoderBaseline(seed)
+        self._isolation_reference = np.empty(0, dtype=np.float64)
+        self._autoencoder_reference = np.empty(0, dtype=np.float64)
+
+    def fit(self, benign: NDArray[np.float64], *, epochs: int = 10) -> AnomalyEnsemble:
+        self.isolation.fit(benign)
+        self.autoencoder.fit(benign, epochs=epochs)
+        self.calibrate(benign)
+        return self
+
+    def calibrate(self, reference: NDArray[np.float64]) -> AnomalyEnsemble:
+        """Set the score scale from an unlabeled reference distribution."""
+        if reference.ndim != 2 or reference.shape[1] != 40 or len(reference) == 0:
+            raise ValueError("anomaly calibration requires a non-empty N x 40 array")
+        self._isolation_reference = np.sort(
+            np.asarray([self.isolation.score(row) for row in reference])
+        )
+        self._autoencoder_reference = np.sort(
+            np.asarray([self.autoencoder.score(row) for row in reference])
+        )
+        return self
+
+    @staticmethod
+    def _percentile(reference: NDArray[np.float64], value: float) -> float:
+        if len(reference) == 0:
+            raise RuntimeError("anomaly ensemble must be fitted")
+        return float(np.searchsorted(reference, value, side="right") / len(reference))
+
+    def score(self, features: NDArray[np.float64]) -> float:
+        isolation = self._percentile(
+            self._isolation_reference, self.isolation.score(features)
+        )
+        autoencoder = self._percentile(
+            self._autoencoder_reference, self.autoencoder.score(features)
+        )
+        return max(isolation, autoencoder)

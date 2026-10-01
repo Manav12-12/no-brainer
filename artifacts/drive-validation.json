@@ -1,18 +1,35 @@
 {
+  "failure_reason": null,
   "held_out_used": false,
+  "lowest_false_action_candidate": {
+    "metrics": {
+      "detection_rate": 1.0,
+      "false_action_rate": 0.0,
+      "mean_time_to_contain": 9.2
+    },
+    "parameters": {
+      "decay": 0.75,
+      "gain": 1.0,
+      "relief_fraction": 0.15,
+      "stimulation_floor": 0.2,
+      "threshold": 1.2,
+      "window": 3
+    }
+  },
   "parameters": {
-    "decay": 0.82,
+    "decay": 0.75,
     "gain": 1.0,
     "relief_fraction": 0.15,
-    "stimulation_floor": 0.15,
-    "threshold": 0.4,
+    "stimulation_floor": 0.25,
+    "threshold": 1.0,
     "window": 3
   },
   "selection": "maximize attack-episode detection, then minimize containment time, subject to benign-episode false-action rate <= 0.05",
+  "status": "selected",
   "validation": {
     "detection_rate": 1.0,
     "false_action_rate": 0.0,
-    "mean_time_to_contain": 4.7
+    "mean_time_to_contain": 9.0
   },
   "validation_episodes": {
     "attack": 10,

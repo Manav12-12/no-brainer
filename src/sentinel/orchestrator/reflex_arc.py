@@ -59,11 +59,13 @@ def evaluate_reflex(
     known = result.answers["known_pattern"].probabilities["true"]
     known_confidence = abs(2 * known - 1)
     action_answer = result.answers["action"]
-    threat_action_probability = 1.0 - action_answer.probabilities.get("no_op", 0.0)
-    pain_signal = min(1.0, max(0.0, (known + threat_action_probability) / 2.0))
     action_confidence = action_answer.confidence
     if action_confidence is None:
-        return ReflexDecision(None, pain_signal, True, 0.0, "missing_action_confidence")
+        return ReflexDecision(None, 0.0, True, 0.0, "missing_action_confidence")
+    # Validation showed that low known-pattern probability carries novelty,
+    # while action confidence carries salience. The former average of `known`
+    # and non-no-op mass inverted the observed attack ranking (ROC-AUC 0.373).
+    pain_signal = min(1.0, max(0.0, (action_confidence + 1.0 - known) / 2.0))
     confidence = min(known_confidence, action_confidence)
     selected = action_answer.selected
     # Jev 1.13.0 emitted known-pattern probabilities in [0.20, 0.38] on the

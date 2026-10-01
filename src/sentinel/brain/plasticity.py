@@ -29,6 +29,32 @@ class PlasticityReport:
     l1_weight_delta: float
 
 
+def _kc_mbon_weights(
+    graph: nx.DiGraph, kc_nodes: list[int], mbon_nodes: list[int]
+) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    weights = np.zeros((len(kc_nodes), len(mbon_nodes)), dtype=np.float64)
+    edge_mask = np.zeros_like(weights, dtype=np.bool_)
+    for kc_index, kc in enumerate(kc_nodes):
+        for mbon_index, mbon in enumerate(mbon_nodes):
+            if graph.has_edge(kc, mbon):
+                weights[kc_index, mbon_index] = float(graph.edges[kc, mbon]["weight"])
+                edge_mask[kc_index, mbon_index] = True
+    return weights, edge_mask
+
+
+def _write_kc_mbon_weights(
+    graph: nx.DiGraph,
+    kc_nodes: list[int],
+    mbon_nodes: list[int],
+    weights: NDArray[np.float64],
+    edge_mask: NDArray[np.bool_],
+) -> None:
+    for kc_index, kc in enumerate(kc_nodes):
+        for mbon_index, mbon in enumerate(mbon_nodes):
+            if edge_mask[kc_index, mbon_index]:
+                graph.edges[kc, mbon]["weight"] = float(weights[kc_index, mbon_index])
+
+
 def train_kc_mbon_weights(
     graph: nx.DiGraph,
     features: NDArray[np.float64],
@@ -44,13 +70,7 @@ def train_kc_mbon_weights(
     kc_nodes = population_ids(graph, "KC")
     mbon_nodes = population_ids(graph, "MBON")
     sensory_nodes = population_ids(graph, "ORN")
-    weights = np.zeros((len(kc_nodes), len(mbon_nodes)), dtype=np.float64)
-    edge_mask = np.zeros_like(weights, dtype=np.bool_)
-    for kc_index, kc in enumerate(kc_nodes):
-        for mbon_index, mbon in enumerate(mbon_nodes):
-            if graph.has_edge(kc, mbon):
-                weights[kc_index, mbon_index] = float(graph.edges[kc, mbon]["weight"])
-                edge_mask[kc_index, mbon_index] = True
+    weights, edge_mask = _kc_mbon_weights(graph, kc_nodes, mbon_nodes)
     initial = weights.copy()
     encoder = SensoryEncoder(len(sensory_nodes))
     for index in range(len(features)):
@@ -76,11 +96,56 @@ def train_kc_mbon_weights(
             weights, kc_activity, reward_prediction_error, learning_rate
         )
         weights[:, :] = np.where(edge_mask, np.clip(proposed, 0.1, 100.0), 0.0)
-        for kc_index, kc in enumerate(kc_nodes):
-            for mbon_index, mbon in enumerate(mbon_nodes):
-                if edge_mask[kc_index, mbon_index]:
-                    graph.edges[kc, mbon]["weight"] = float(
-                        weights[kc_index, mbon_index]
-                    )
+        _write_kc_mbon_weights(graph, kc_nodes, mbon_nodes, weights, edge_mask)
     delta = float(np.abs(weights - initial).sum())
     return PlasticityReport(len(features), int(edge_mask.sum()), delta)
+
+
+def train_kc_mbon_nociception(
+    graph: nx.DiGraph,
+    pain_signals: NDArray[np.float64],
+    anomaly_signals: NDArray[np.float64],
+    labels: NDArray[np.int64],
+    *,
+    duration_ms: float,
+    random_seed: int,
+    learning_rate: float,
+) -> PlasticityReport:
+    """Train graph weights from independent pain and anomaly channels."""
+    if (
+        pain_signals.ndim != 1
+        or anomaly_signals.ndim != 1
+        or len(pain_signals) != len(anomaly_signals)
+        or len(pain_signals) != len(labels)
+    ):
+        raise ValueError("nociceptive training arrays must be aligned vectors")
+    kc_nodes = population_ids(graph, "KC")
+    mbon_nodes = population_ids(graph, "MBON")
+    sensory_nodes = population_ids(graph, "ORN")
+    weights, edge_mask = _kc_mbon_weights(graph, kc_nodes, mbon_nodes)
+    initial = weights.copy()
+    encoder = SensoryEncoder(len(sensory_nodes))
+    for index in range(len(labels)):
+        counts = simulate_lif(
+            graph,
+            sensory_nodes,
+            encoder.encode_nociception(
+                float(pain_signals[index]), float(anomaly_signals[index])
+            ),
+            duration_ms,
+            LIFParameters(),
+            random_seed + index,
+        )
+        kc_activity = np.asarray([counts[node] for node in kc_nodes], dtype=np.float64)
+        observed = np.clip(
+            np.asarray([counts[node] for node in mbon_nodes], dtype=np.float64) / 10.0,
+            0.0,
+            1.0,
+        )
+        error = np.full(len(mbon_nodes), float(labels[index])) - observed
+        proposed = offline_kc_mbon_update(weights, kc_activity, error, learning_rate)
+        weights[:, :] = np.where(edge_mask, np.clip(proposed, 0.1, 100.0), 0.0)
+        _write_kc_mbon_weights(graph, kc_nodes, mbon_nodes, weights, edge_mask)
+    return PlasticityReport(
+        len(labels), int(edge_mask.sum()), float(np.abs(weights - initial).sum())
+    )

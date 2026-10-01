@@ -13,16 +13,17 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from sentinel.brain.plasticity import train_kc_mbon_weights
+from sentinel.brain.plasticity import train_kc_mbon_nociception
+from sentinel.brain.runner import run_brain_from_nociception
 from sentinel.config import JevConfig, load_yaml
 from sentinel.connectome.loader import synthetic_connectome
 from sentinel.cyberbody.actions import DefensiveAction
 from sentinel.cyberbody.env import CyberRange
 from sentinel.data.features import FEATURE_NAMES, FeaturePipeline, serialize_vector
 from sentinel.data.synthetic import generate_synthetic_events
+from sentinel.eval.baselines import AnomalyEnsemble
 from sentinel.jev.local_backend import LocalBackend
 from sentinel.orchestrator.drive import DriveParameters, HomeostaticDrive
-from sentinel.orchestrator.escalation import escalate_to_brain
 from sentinel.orchestrator.reflex_arc import evaluate_reflex
 from sentinel.orchestrator.strategy import select_response_strategy
 from sentinel.seed import set_global_seed
@@ -34,13 +35,19 @@ STEPS_PER_EPISODE = 8
 
 def training_data(
     seed: int,
-) -> tuple[NDArray[np.float64], NDArray[np.int64], LocalBackend]:
+) -> tuple[NDArray[np.float64], NDArray[np.int64], LocalBackend, AnomalyEnsemble]:
     training = generate_synthetic_events(800, seed)
     pipeline = FeaturePipeline.create().fit(training)
     transformed = pipeline.transform(training)
     values = transformed.loc[:, FEATURE_NAMES].to_numpy(dtype=np.float64)
     labels = transformed["label"].to_numpy(dtype=np.int64)
-    return values, labels, LocalBackend().fit(values, labels)
+    benign = values[labels == 0]
+    return (
+        values,
+        labels,
+        LocalBackend().fit(values, labels),
+        AnomalyEnsemble(seed).fit(benign, epochs=5).calibrate(values),
+    )
 
 
 def graph_payload(seed: int) -> tuple[Any, dict[str, Any]]:
@@ -177,14 +184,36 @@ def simulation_events(seed: int = 1729) -> Iterator[dict[str, Any]]:
         "state": "training",
         "message": "Training KC→MBON weights",
     }
-    values, labels, model = training_data(seed)
+    values, labels, model, anomaly_ensemble = training_data(seed)
     benign = np.flatnonzero(labels == 0)[:16]
     attack = np.flatnonzero(labels == 1)[:16]
     selected = np.concatenate([benign, attack])
     graph, _ = graph_payload(seed)
-    train_kc_mbon_weights(
+    training_pain = np.asarray(
+        [
+            evaluate_reflex(
+                model,
+                serialize_vector(
+                    values[index],
+                    host_role="workstation",
+                    segment="user",
+                    recent_event_count=int(index),
+                ),
+                jev_config.reflex_confidence_threshold,
+                jev_config.known_pattern_threshold,
+            ).pain_signal
+            for index in selected
+        ],
+        dtype=np.float64,
+    )
+    training_anomaly = np.asarray(
+        [anomaly_ensemble.score(values[index]) for index in selected],
+        dtype=np.float64,
+    )
+    train_kc_mbon_nociception(
         graph,
-        values[selected],
+        training_pain,
+        training_anomaly,
         labels[selected],
         duration_ms=float(brain_config["simulation_ms"]),
         random_seed=seed + 20_000,
@@ -220,9 +249,11 @@ def simulation_events(seed: int = 1729) -> Iterator[dict[str, Any]]:
                 jev_config.reflex_confidence_threshold,
                 jev_config.known_pattern_threshold,
             )
-            brain, counts = escalate_to_brain(
+            anomaly_signal = anomaly_ensemble.score(observation.features)
+            brain, counts = run_brain_from_nociception(
                 graph,
                 reflex.pain_signal,
+                anomaly_signal,
                 episode_seed + observation.step,
                 float(brain_config["simulation_ms"]),
             )

@@ -6,14 +6,20 @@ from typing import Any
 
 import numpy as np
 
-from sentinel.brain.plasticity import train_kc_mbon_weights
-from sentinel.brain.runner import run_brain_from_pain
+from sentinel.brain.plasticity import train_kc_mbon_nociception
+from sentinel.brain.runner import run_brain_from_nociception
 from sentinel.config import JevConfig, load_yaml
 from sentinel.connectome.loader import synthetic_connectome
 from sentinel.cyberbody.attacker import KillChainStage
 from sentinel.cyberbody.env import CyberRange
-from sentinel.data.features import FEATURE_NAMES, FeaturePipeline, serialize_vector
+from sentinel.data.features import (
+    FEATURE_NAMES,
+    FeaturePipeline,
+    serialize_features,
+    serialize_vector,
+)
 from sentinel.data.synthetic import generate_synthetic_events
+from sentinel.eval.baselines import AnomalyEnsemble
 from sentinel.jev.local_backend import LocalBackend
 from sentinel.orchestrator.drive import DriveParameters, HomeostaticDrive
 from sentinel.orchestrator.reflex_arc import evaluate_reflex
@@ -26,14 +32,41 @@ def validation_traces(root: Path) -> list[dict[str, Any]]:
     values = transformed.loc[:, FEATURE_NAMES].to_numpy(dtype=np.float64)
     labels = transformed["label"].to_numpy(dtype=np.int64)
     reflex_model = LocalBackend().fit(values, labels)
+    anomaly_ensemble = AnomalyEnsemble(1729).fit(values[labels == 0], epochs=5)
+    validation_features = []
+    for benign_only in (False, True):
+        for episode_index in range(10):
+            seed = 30_000 + int(benign_only) * 1_000 + episode_index
+            environment = CyberRange(12, 16, seed, benign_only=benign_only)
+            validation_features.extend(
+                environment.observe().features.copy() for _ in range(16)
+            )
+    anomaly_ensemble.calibrate(np.asarray(validation_features, dtype=np.float64))
     jev_config = JevConfig.model_validate(load_yaml(root / "configs/jev.yaml"))
     selected = np.concatenate(
         [np.flatnonzero(labels == 0)[:16], np.flatnonzero(labels == 1)[:16]]
     )
     graph = synthetic_connectome(1729)
-    train_kc_mbon_weights(
+    training_pain = np.asarray(
+        [
+            evaluate_reflex(
+                reflex_model,
+                serialize_features(transformed.iloc[index]),
+                jev_config.reflex_confidence_threshold,
+                jev_config.known_pattern_threshold,
+            ).pain_signal
+            for index in selected
+        ],
+        dtype=np.float64,
+    )
+    training_anomaly = np.asarray(
+        [anomaly_ensemble.score(values[index]) for index in selected],
+        dtype=np.float64,
+    )
+    train_kc_mbon_nociception(
         graph,
-        values[selected],
+        training_pain,
+        training_anomaly,
         labels[selected],
         duration_ms=50.0,
         random_seed=21_729,
@@ -59,9 +92,11 @@ def validation_traces(root: Path) -> list[dict[str, Any]]:
                     jev_config.reflex_confidence_threshold,
                     jev_config.known_pattern_threshold,
                 )
-                brain, _ = run_brain_from_pain(
+                anomaly_signal = anomaly_ensemble.score(observation.features)
+                brain, _ = run_brain_from_nociception(
                     graph,
                     reflex.pain_signal,
+                    anomaly_signal,
                     seed + observation.step,
                     duration_ms=50.0,
                 )
@@ -123,6 +158,7 @@ def main() -> None:
     root = Path(__file__).resolve().parents[1]
     traces = validation_traces(root)
     candidates: list[tuple[float, float, float, DriveParameters]] = []
+    attempted: list[tuple[dict[str, float], DriveParameters]] = []
     for window in (3, 4, 5):
         for decay in (0.75, 0.82, 0.9):
             for floor in (0.10, 0.15, 0.20, 0.25):
@@ -136,6 +172,7 @@ def main() -> None:
                         relief_fraction=0.15,
                     )
                     metrics = score(traces, parameters)
+                    attempted.append((metrics, parameters))
                     if metrics["false_action_rate"] <= 0.05:
                         candidates.append(
                             (
@@ -145,12 +182,22 @@ def main() -> None:
                                 parameters,
                             )
                         )
-    if not candidates:
-        raise RuntimeError("no drive candidate met the validation false-action cap")
-    parameters = max(candidates, key=lambda item: item[:3])[3]
+    parameters = max(candidates, key=lambda item: item[:3])[3] if candidates else None
+    lowest_false_rate = min(
+        attempted,
+        key=lambda item: (
+            item[0]["false_action_rate"],
+            -item[0]["detection_rate"],
+        ),
+    )
     result = {
-        "validation": score(traces, parameters),
-        "parameters": parameters.__dict__,
+        "status": "selected" if parameters is not None else "no_candidate",
+        "validation": score(traces, parameters) if parameters is not None else None,
+        "parameters": parameters.__dict__ if parameters is not None else None,
+        "lowest_false_action_candidate": {
+            "metrics": lowest_false_rate[0],
+            "parameters": lowest_false_rate[1].__dict__,
+        },
         "validation_episodes": {
             "attack": 10,
             "benign": 10,
@@ -162,6 +209,9 @@ def main() -> None:
             "subject to benign-episode false-action rate <= 0.05"
         ),
         "held_out_used": False,
+        "failure_reason": None
+        if parameters is not None
+        else "No candidate met the precommitted false-action rate <= 0.05 cap.",
     }
     destination = root / "artifacts/drive-validation.json"
     destination.write_text(

@@ -9,7 +9,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from sentinel.brain.plasticity import train_kc_mbon_weights
+from sentinel.brain.plasticity import train_kc_mbon_nociception
+from sentinel.brain.runner import run_brain_from_nociception
 from sentinel.config import JevConfig, load_yaml
 from sentinel.connectome.loader import synthetic_connectome
 from sentinel.cyberbody.actions import DefensiveAction, apply_action
@@ -17,10 +18,13 @@ from sentinel.cyberbody.topology import build_topology
 from sentinel.data.features import FEATURE_NAMES, FeaturePipeline, serialize_features
 from sentinel.data.loaders import load_processed
 from sentinel.data.splits import family_holdout_split
-from sentinel.eval.baselines import AutoencoderBaseline, IsolationBaseline
+from sentinel.eval.baselines import (
+    AnomalyEnsemble,
+    AutoencoderBaseline,
+    IsolationBaseline,
+)
 from sentinel.jev.local_backend import LocalBackend
 from sentinel.orchestrator.drive import DriveParameters, HomeostaticDrive
-from sentinel.orchestrator.escalation import escalate_to_brain
 from sentinel.orchestrator.reflex_arc import evaluate_reflex
 from sentinel.orchestrator.strategy import select_response_strategy
 from sentinel.seed import set_global_seed
@@ -47,14 +51,35 @@ def main() -> None:
     benign = x_train[y_train == 0]
     isolation = IsolationBaseline(1729).fit(benign)
     autoencoder = AutoencoderBaseline(1729).fit(benign, epochs=5)
+    anomaly_ensemble = AnomalyEnsemble(1729).fit(benign, epochs=5)
+    anomaly_ensemble.calibrate(
+        validation.loc[:, FEATURE_NAMES].to_numpy(dtype=np.float64)
+    )
     graph = synthetic_connectome(1729)
     plasticity_examples = int(brain_config["plasticity_examples"])
     benign_indices = np.flatnonzero(y_train == 0)[: plasticity_examples // 2]
     attack_indices = np.flatnonzero(y_train == 1)[: plasticity_examples // 2]
     plasticity_indices = np.concatenate([benign_indices, attack_indices])
-    plasticity_report = train_kc_mbon_weights(
+    training_pain = np.asarray(
+        [
+            evaluate_reflex(
+                local,
+                serialize_features(train.iloc[index]),
+                jev_config.reflex_confidence_threshold,
+                jev_config.known_pattern_threshold,
+            ).pain_signal
+            for index in plasticity_indices
+        ],
+        dtype=np.float64,
+    )
+    training_anomaly = np.asarray(
+        [anomaly_ensemble.score(x_train[index]) for index in plasticity_indices],
+        dtype=np.float64,
+    )
+    plasticity_report = train_kc_mbon_nociception(
         graph,
-        x_train[plasticity_indices],
+        training_pain,
+        training_anomaly,
         y_train[plasticity_indices],
         duration_ms=float(brain_config["simulation_ms"]),
         random_seed=20_000,
@@ -89,9 +114,11 @@ def main() -> None:
         host_id = f"host-{event_index % len(hosts):02d}"
         if reflex.action is not None:
             apply_action(reflex.action, hosts[host_id])
-        brain, _ = escalate_to_brain(
+        anomaly_signal = anomaly_ensemble.score(values)
+        brain, _ = run_brain_from_nociception(
             graph,
             reflex.pain_signal,
+            anomaly_signal,
             1729 + event_index,
             float(brain_config["simulation_ms"]),
         )

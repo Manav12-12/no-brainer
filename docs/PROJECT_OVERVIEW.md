@@ -9,17 +9,22 @@ telemetry, and actions are simulated Python objects.
 
 ## Decision architecture
 
-- **Jev reflex:** handles known, confident cases using a closed action set.
-- **Brain escalation:** processes uncertain events through ORN, PN, KC, MBON,
-  APL, and descending proxy populations.
-- **Homeostatic drive:** accumulates sustained uncertain stimulation per host,
-  decays slowly, and triggers isolation at a validated threshold.
+- **Jev reflex:** may act immediately and always reports a scalar pain signal.
+- **Independent anomaly nociceptor:** combines IsolationForest and autoencoder
+  scores without replacing Jev pain.
+- **Brain:** processes pain and anomaly on separate ORN channels through PN,
+  KC, MBON, APL, and descending proxy populations.
+- **Homeostatic drive:** accumulates sustained neural stimulation per host,
+  decays slowly, and can trigger a response strategy at a validation-selected
+  threshold.
 - **Cyber-range feedback:** isolation changes attacker state to `contained`,
   which removes attack telemetry and lets drive continue to fall.
 
-The drive input is the mean of normalized sensory pressure and propagated KC
-novelty. This gives the loop a real neural signal while retaining sensitivity
-to anomalous encoded telemetry.
+The immediate reflex and upstream report are independent. A confident Jev
+action does not bypass the brain. Drive combines nociceptor input, propagated
+KC activity, and a trainable MBON readout. Threshold crossings select a response
+strategy that can contain one host, escalate a narrow reflex, or coordinate
+multiple hosts in one segment.
 
 ## What changed
 
@@ -41,6 +46,12 @@ false actions and mean containment time 5.1 steps. B4 and B5 also reached 100%,
 at 6.8 and 7.5 steps. B6 reached 100% at 2.1 steps with a 2.11% false-action
 rate. These data show a functioning controller, not a FlyWire-topology benefit.
 
+On the mixed 200-record cached benchmark, the combined detector reached
+ROC-AUC 0.734 and PR-AUC 0.728 versus B6 at 0.725/0.725. At validation-selected
+thresholds, combined F1 was 0.692 versus B6 at 0.712. B4 and B5 reached higher
+ranking and F1 scores than the intended graph. The architecture is more
+expressive, but it is not a more accurate production detector.
+
 The live browser receives each drive value from Python over server-sent events.
 The proof clip in `docs/assets/drosophila-sentinel-drive-cycle.mp4` shows drive
 crossing its threshold, isolation firing, and pressure relief.
@@ -51,6 +62,7 @@ crossing its threshold, isolation firing, and pressure relief.
 make setup
 PYTHONPATH=src .venv/bin/python scripts/run_reachability_probe.py
 PYTHONPATH=src .venv/bin/python scripts/tune_drive.py
+PYTHONPATH=src .venv/bin/python scripts/run_detection_quality.py
 PYTHONPATH=src .venv/bin/python scripts/run_experiments.py --mode replay
 make live
 ```
@@ -73,9 +85,16 @@ uses cached/offline reflex behavior.
 - The 48-node network and cyber-to-neuron encoder are engineering proxies.
 - The aggregate edge parameter does not identify actual FlyWire ORN/PN paths.
 - B4/B5 perform comparably enough to rule out a topology-specific claim.
-- B5's result relies mainly on shared sensory pressure and has no KC-to-MBON
-  learning edges.
-- The Jev result covers one cached model version and has low detection.
+- KC-to-MBON learning adds little beyond the untrained dual-input graph.
+- The Jev result covers one cached model version. Its semantically named v2
+  request could not be measured without new authenticated calls.
+- The mixed Jev partition is balanced and source-disjoint from B6 training but
+  had previously been used for aggregate gate reporting.
+- High false-positive rates make every evaluated operating point unsuitable
+  for deployment.
+- Sequential dual-input drive tuning reached 100% validation episode detection,
+  0% benign-episode false actions, and mean containment step 9.0. This synthetic
+  result does not remove the mixed record benchmark's high-FPR limitation.
 - Synthetic episodes do not represent operational prevalence or costs.
 
 See `docs/AUDIT.md` for design decisions and `docs/RESULTS.md` for complete

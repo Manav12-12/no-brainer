@@ -5,7 +5,11 @@ import pytest
 
 from sentinel.connectome.loader import random_sparse_mushroom_body
 from sentinel.eval.ablations import default_ablations
-from sentinel.eval.baselines import AutoencoderBaseline, IsolationBaseline
+from sentinel.eval.baselines import (
+    AnomalyEnsemble,
+    AutoencoderBaseline,
+    IsolationBaseline,
+)
 from sentinel.eval.metrics import detection_rate, false_action_rate, mean_ci
 from sentinel.eval.report import write_results
 
@@ -34,6 +38,10 @@ def test_local_anomaly_baselines_train() -> None:
     autoencoder = AutoencoderBaseline(3).fit(benign, epochs=1)
     assert isinstance(isolation.detect(sample), bool)
     assert isinstance(autoencoder.detect(sample), bool)
+    ensemble = AnomalyEnsemble(3).fit(benign, epochs=1)
+    assert 0 <= ensemble.score(sample) <= 1
+    ensemble.calibrate(benign[:20])
+    assert 0 <= ensemble.score(sample) <= 1
 
 
 @pytest.mark.unit

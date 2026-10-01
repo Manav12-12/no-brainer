@@ -1,0 +1,18 @@
+{
+  "labels_used": "validation only",
+  "trained_combined": {
+    "roc_auc": 0.6673,
+    "pr_auc": 0.6596957725340131,
+    "l1_weight_delta": 99.83999999999992,
+    "updated_edges": 96
+  },
+  "untrained_combined": {
+    "roc_auc": 0.6592,
+    "pr_auc": 0.6556727750484148
+  },
+  "jev_pain_alone": {
+    "roc_auc": 0.641,
+    "pr_auc": 0.6558761485048111
+  },
+  "conclusion": "KC-to-MBON training changed all eligible edges but added only 0.0081 ROC-AUC and 0.0040 PR-AUC over the untrained dual-input graph. Most discrimination comes from the independent anomaly input, not learned MBON weights."
+}

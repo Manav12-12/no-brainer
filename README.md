@@ -27,12 +27,14 @@ flowchart LR
     D -->|local| E[Calibrated local model]
     D -->|replay| F[Jev cache]
     D -->|approved live mode| G[TypeSafe Jev API]
-    E --> H{Confidence threshold}
+    E --> H[Action + pain report]
     F --> H
     G --> H
-    H -->|confident| I[Simulated action]
-    H -->|uncertain| J[Brian2 brain path]
-    J --> K[Sensory and KC stimulation]
+    H -->|confident| I[Immediate reflex action]
+    H -->|pain every event| J[Brian2 brain path]
+    B --> S[Independent anomaly nociceptor]
+    S --> J
+    J --> K[KC and trainable MBON activity]
     K --> L[Per-host sliding-window drive]
     L -->|threshold crossed| I
     I --> M[Telemetry becomes contained]
@@ -49,7 +51,7 @@ and never calls Jev.
 
 ## Measured results
 
-### Closed-loop held-out synthetic evaluation
+### Historical pain-only closed-loop evaluation
 
 Drive parameters were selected only on 20 validation episodes. The following
 results use 10 fixed, disjoint evaluation seeds per arm:
@@ -68,6 +70,23 @@ actions and caused eight benign-host injuries across its 10 episodes. B4 and
 B5 remain honest controls: their comparable containment means these results do
 not establish a FlyWire-specific benefit. See `docs/RESULTS.md` for definitions
 and limitations.
+
+### Mixed detection-quality evaluation
+
+| Method | F1 | FPR | ROC-AUC | PR-AUC |
+| --- | ---: | ---: | ---: | ---: |
+| Jev reflex | 0.681 | 0.820 | 0.651 | 0.635 |
+| Brain/drive, pain only | 0.669 | 0.950 | 0.645 | 0.640 |
+| Combined Jev + B6 + brain | 0.692 | 0.700 | 0.734 | 0.728 |
+| B4 shuffled | 0.695 | 0.670 | 0.738 | 0.742 |
+| B5 random | 0.717 | 0.630 | 0.749 | 0.754 |
+| B6 baseline | 0.712 | 0.720 | 0.725 | 0.725 |
+
+The combined system ranks slightly better than B6 but has lower selected F1.
+B4/B5 perform better than the intended graph, and all selected operating points
+have excessive false positives. In the separate synthetic sequential test,
+dual-input drive tuning reached 100% episode detection with no benign-episode
+false actions and mean containment step 9.0.
 
 ### Live drive proof
 
@@ -98,8 +117,8 @@ validity.
 - 174 held-out Worms records
 - 100% simulated pipeline action rate on the malicious-only test set
 - 98.28% IsolationForest/autoencoder baseline detection
-- 8.98 ms mean pipeline latency
-- 9.94 ms p95 pipeline latency
+- 356.04 ms mean pipeline latency
+- 401.00 ms p95 pipeline latency
 
 The held-out set contains only malicious Worms records, so it cannot measure a
 false-action rate.
@@ -260,8 +279,8 @@ make test
 .venv/bin/python scripts/verify_manifest.py
 ```
 
-The final verification passed Ruff, strict mypy, 58 tests, Bandit,
-detect-secrets, and manifest verification. The test suite reached 87.84%
+The final verification passed Ruff, strict mypy, 60 tests, Bandit,
+detect-secrets, and manifest verification. The test suite reached 88.85%
 branch-aware coverage. The live dependency audit found no unsuppressed known
 vulnerabilities. `PYSEC-2026-113` is suppressed because the reviewed advisory
 states that the affected Arrow C++ API is not exposed by the Python binding used

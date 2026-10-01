@@ -4,8 +4,8 @@
 
 The system now demonstrates the complete defensive cycle:
 
-1. uncertain events ascend past the fast reflex path;
-2. encoded sensory pressure and propagated KC activity stimulate per-host drive;
+1. every typed reflex result emits pain upstream, whether or not it acts;
+2. Jev pain and independent statistical anomaly channels stimulate the brain;
 3. a three-event sliding window and leaky accumulator build pressure;
 4. crossing 0.4 triggers simulated host isolation;
 5. the attacker changes to `contained`, removing malicious telemetry offsets;
@@ -14,10 +14,10 @@ The system now demonstrates the complete defensive cycle:
 The integration test checks the state transition and post-action decline. The
 live recording shows the same values streamed from Python.
 
-## Validation-only tuning
+## Drive validation
 
-`scripts/tune_drive.py` evaluated 10 attack and 10 benign validation episodes
-using seeds 30000–30009 and 31000–31009. It selected:
+The original pain-only `scripts/tune_drive.py` run evaluated 10 attack and 10
+benign validation episodes using seeds 30000–30009 and 31000–31009. It selected:
 
 | Parameter | Value |
 | --- | ---: |
@@ -27,11 +27,19 @@ using seeds 30000–30009 and 31000–31009. It selected:
 | Action threshold | 0.40 |
 | Relief fraction | 0.15 |
 
-Validation reached 100% attack-episode detection, 0% benign-episode false
-actions, and mean containment step 4.7. Evaluation seeds were not used during
-selection. Exact output is in `artifacts/drive-validation.json`.
+That historical architecture reached 100% attack-episode detection, 0% benign
+false actions, and mean containment step 4.7. After adding the independent
+anomaly channel, the same predeclared search selected window 3, decay 0.75,
+stimulation floor 0.25, and threshold 1.0. It reached 100% attack-episode
+detection, 0% benign-episode false actions, and mean containment step 9.0.
+`artifacts/drive-validation.json` records the selection. Evaluation seeds were
+not used.
 
 ## Held-out synthetic evaluation
+
+This table records the earlier pain-only architecture and is retained as a
+historical closed-loop result. It is not the mixed detection-quality benchmark
+reported below.
 
 The final evaluation ran once on seeds 101, 202, 303, 404, 505, 606, 707, 808,
 909, and 1010. Each arm received 40 steps per episode.
@@ -53,6 +61,66 @@ attack. **TTC** is the simulation step where containment was first observed.
 B6 is materially faster. B2/B3 are more action-sparse in this simulation, but
 the evaluation does not establish that this tradeoff generalizes to real
 traffic.
+
+## Mixed detection-quality evaluation
+
+The detection benchmark uses the pre-existing locked Jev cache partition: 100
+benign and 100 malicious records spanning ten attack families. B6 training
+excludes all 400 cached calibration records, giving zero source-row overlap.
+Thresholds and score scaling were selected on the other 200 cached validation
+records. The locked partition had previously been used for aggregate gate
+reporting, so it is not a pristine never-observed test set; this is the only
+mixed set for which real cached Jev responses exist without new network calls.
+
+| Method | Precision | Recall | F1 | FPR | ROC-AUC | PR-AUC |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Jev reflex | 0.534 | 0.940 | 0.681 | 0.820 | 0.651 | 0.635 |
+| Brain/drive, pain only | 0.508 | 0.980 | 0.669 | 0.950 | 0.645 | 0.640 |
+| Combined Jev + B6 + trained brain | 0.563 | 0.900 | 0.692 | 0.700 | 0.734 | 0.728 |
+| B4 degree-preserving shuffle | 0.571 | 0.890 | 0.695 | 0.670 | 0.738 | 0.742 |
+| B5 random sparse graph | 0.591 | 0.910 | 0.717 | 0.630 | 0.749 | 0.754 |
+| B6 anomaly baseline | 0.569 | 0.950 | 0.712 | 0.720 | 0.725 | 0.725 |
+
+The combined score ranks records slightly better than B6, but its selected F1
+is lower. B4 and B5 outperform the intended graph. The defensible conclusion
+is that the combined system roughly matches B6 in ranking quality and
+underperforms it at the selected operating point; it does not establish a
+connectome advantage. F1-maximizing thresholds also produce unacceptable
+false-positive rates.
+
+`artifacts/detection-quality.json` contains detection-rate/FPR pairs at every
+threshold from 0.0 through 1.0 in increments of 0.05.
+
+### Jev discrimination diagnosis
+
+The original pain calculation discarded useful ordering:
+
+| Validation score | ROC-AUC | PR-AUC |
+| --- | ---: | ---: |
+| Old pain | 0.373 | 0.427 |
+| `mean(action confidence, 1 − known probability)` | 0.641 | 0.656 |
+
+The v1 state retains all 40 permitted numeric values but anonymizes their
+names. Jev sees `feature_00` through `feature_39` rather than duration, byte,
+TTL, load, packet, TCP, and connection-history semantics. Its role and segment
+fields are synthetic cycling values, and `recent_event_count` is actually a
+source-row modulus. A semantically named v2 candidate was prepared, but it has
+zero cache hits and would require 200 authenticated validation calls. No API
+credential was available, so no revised-prompt result is claimed.
+
+### Independent anomaly channel and learning
+
+Pain and anomaly are now encoded on separate ORN halves. The anomaly signal is
+an IsolationForest/autoencoder ensemble calibrated without held-out labels.
+KC-to-MBON training changed all 96 eligible intended-graph edges. On validation,
+training improved the combined graph only from ROC-AUC 0.6592 to 0.6673 and
+PR-AUC 0.6557 to 0.6597. Most useful discrimination comes from the independent
+anomaly signal, not learned MBON weights. B5 changed no effective weight despite
+having 19 eligible edges because its observed KC update was zero.
+
+UNSW source/destination addresses were intentionally excluded, and role/segment
+metadata are synthetic. The mixed benchmark therefore measures record-level
+neural pressure, not genuine per-host temporal drive sequences.
 
 ## Root-cause fixes
 
@@ -83,10 +151,10 @@ pathways. Exact measurements are in `artifacts/brain-reachability.json`.
 
 ### Learning connection
 
-The configured 32-record balanced training batch changed all 96 KC-to-MBON
-edges from 31.00 to 31.96, an L1 delta of 92.16 in the measured run. Updated
-weights are written into the graph consumed by later Brian2 simulations. B5
-has no eligible KC-to-MBON edges and therefore records zero learning delta.
+The current dual-input 32-record batch changes all 96 eligible intended-graph
+edges and writes them into the graph consumed by later Brian2 simulations.
+The mixed validation result above shows that this learning has only a small
+effect beyond the untrained graph.
 
 ## Controls and interpretation
 
@@ -109,6 +177,6 @@ closed-loop synthetic episode metrics above.
 
 ## Verification
 
-Final checks passed Ruff, strict mypy, 58 tests with 87.84% branch-aware
+Final checks passed Ruff, strict mypy, 60 tests with 88.85% branch-aware
 coverage, Bandit, detect-secrets, and manifest verification. Default tests
 continue to block network sockets; no live Jev calls were made.

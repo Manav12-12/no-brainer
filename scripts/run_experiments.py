@@ -11,7 +11,8 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from sentinel.brain.plasticity import train_kc_mbon_weights
+from sentinel.brain.plasticity import train_kc_mbon_nociception
+from sentinel.brain.runner import run_brain_from_nociception
 from sentinel.config import JevConfig, config_hash, load_yaml
 from sentinel.connectome.loader import random_sparse_mushroom_body, synthetic_connectome
 from sentinel.connectome.shuffle import degree_preserving_shuffle
@@ -20,7 +21,11 @@ from sentinel.cyberbody.attacker import KillChainStage
 from sentinel.cyberbody.env import CyberRange
 from sentinel.data.features import FEATURE_NAMES, FeaturePipeline, serialize_vector
 from sentinel.data.synthetic import generate_synthetic_events
-from sentinel.eval.baselines import AutoencoderBaseline, IsolationBaseline
+from sentinel.eval.baselines import (
+    AnomalyEnsemble,
+    AutoencoderBaseline,
+    IsolationBaseline,
+)
 from sentinel.eval.report import write_results
 from sentinel.jev.budget import BudgetGuard
 from sentinel.jev.cache import DecisionCache
@@ -29,7 +34,6 @@ from sentinel.jev.local_backend import LocalBackend
 from sentinel.jev.replay_backend import ReplayBackend
 from sentinel.jev.typesafe_backend import TypeSafeBackend
 from sentinel.orchestrator.drive import DriveParameters, HomeostaticDrive
-from sentinel.orchestrator.escalation import escalate_to_brain
 from sentinel.orchestrator.reflex_arc import evaluate_reflex
 from sentinel.orchestrator.strategy import select_response_strategy
 from sentinel.seed import set_global_seed
@@ -66,6 +70,7 @@ def train_local(
     LocalBackend,
     IsolationBaseline,
     AutoencoderBaseline,
+    AnomalyEnsemble,
     NDArray[np.float64],
     NDArray[np.int64],
 ]:
@@ -80,6 +85,7 @@ def train_local(
         local,
         IsolationBaseline(seed).fit(benign),
         AutoencoderBaseline(seed).fit(benign, epochs=5),
+        AnomalyEnsemble(seed).fit(benign, epochs=5).calibrate(values),
         values,
         labels,
     )
@@ -93,6 +99,7 @@ def run_episode(
     local: LocalBackend,
     isolation: IsolationBaseline,
     autoencoder: AutoencoderBaseline,
+    anomaly_ensemble: AnomalyEnsemble,
     known_pattern_threshold: float = 0.27,
     reflex_confidence_threshold: float = 0.28,
     brain_duration_ms: float = 50.0,
@@ -123,9 +130,33 @@ def run_episode(
         benign = np.flatnonzero(plasticity_labels == 0)[: plasticity_examples // 2]
         attack = np.flatnonzero(plasticity_labels == 1)[: plasticity_examples // 2]
         selected = np.concatenate([benign, attack])
-        report = train_kc_mbon_weights(
+        training_pain = np.asarray(
+            [
+                evaluate_reflex(
+                    local,
+                    serialize_vector(
+                        plasticity_features[index],
+                        host_role="workstation",
+                        segment="user",
+                        recent_event_count=int(index),
+                    ),
+                    reflex_confidence_threshold,
+                    known_pattern_threshold,
+                ).pain_signal
+                for index in selected
+            ],
+            dtype=np.float64,
+        )
+        training_anomaly = np.asarray(
+            [anomaly_ensemble.score(plasticity_features[index]) for index in selected],
+            dtype=np.float64,
+        )
+        if arm == "B2":
+            training_anomaly.fill(0.0)
+        report = train_kc_mbon_nociception(
             graphs[arm],
-            plasticity_features[selected],
+            training_pain,
+            training_anomaly,
             plasticity_labels[selected],
             duration_ms=brain_duration_ms,
             random_seed=seed + 20_000,
@@ -181,9 +212,13 @@ def run_episode(
 
         if arm in graphs and reflex is not None:
             brain_events += 1
-            brain, _ = escalate_to_brain(
+            anomaly_signal = (
+                0.0 if arm == "B2" else anomaly_ensemble.score(observation.features)
+            )
+            brain, _ = run_brain_from_nociception(
                 graphs[arm],
                 reflex.pain_signal,
+                anomaly_signal,
                 seed + observation.step,
                 brain_duration_ms,
             )
@@ -287,9 +322,14 @@ def main() -> None:
     for seed_value in experiment["seeds"]:
         seed = int(seed_value)
         set_global_seed(seed)
-        local, isolation, autoencoder, training_values, training_labels = train_local(
-            seed
-        )
+        (
+            local,
+            isolation,
+            autoencoder,
+            anomaly_ensemble,
+            training_values,
+            training_labels,
+        ) = train_local(seed)
         for arm in experiment["arms"]:
             rows.append(
                 run_episode(
@@ -300,6 +340,7 @@ def main() -> None:
                     local,
                     isolation,
                     autoencoder,
+                    anomaly_ensemble,
                     jev_config.known_pattern_threshold,
                     jev_config.reflex_confidence_threshold,
                     float(brain_config["simulation_ms"]),

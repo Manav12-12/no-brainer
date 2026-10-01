@@ -51,3 +51,26 @@ def run_brain_from_pain(
         seed,
     )
     return brain_readout(graph, counts, rates, pain_input=True), counts
+
+
+def run_brain_from_nociception(
+    graph: nx.DiGraph,
+    pain_signal: float,
+    anomaly_signal: float,
+    seed: int,
+    duration_ms: float = 100.0,
+    params: LIFParameters | None = None,
+) -> tuple[BrainOutput, dict[int, int]]:
+    """Propagate independent reflex and statistical nociceptor channels."""
+    require_populations(graph)
+    sensory = population_ids(graph, "ORN")
+    rates = SensoryEncoder(len(sensory)).encode_nociception(pain_signal, anomaly_signal)
+    counts = simulate_lif(
+        graph,
+        sensory,
+        rates,
+        duration_ms,
+        params or LIFParameters(),
+        seed,
+    )
+    return brain_readout(graph, counts, rates, pain_input=True), counts
