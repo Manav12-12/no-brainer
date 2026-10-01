@@ -1,5 +1,23 @@
 # Results
 
+## Final conclusion
+
+The project's demonstrated contribution is a working, audited, closed-loop
+reflex-and-escalation architecture. It implements a real stimulus-buildup,
+action, containment, and relief cycle while preserving an offline-first audit
+trail. Its strongest result is the **sequential episode-level** drive
+validation: 100% attack-episode detection, 0% benign-episode false actions, and
+mean containment step 9.0 on 10 attack and 10 benign synthetic validation
+episodes.
+
+That result must not be conflated with the **record-level** mixed benchmark.
+On mixed records, the combined system is not a better detector than standard
+anomaly detection, and its false-positive rate is unsuitable for deployment.
+Across every evaluation round, the B4 shuffled and B5 random controls matched
+or outperformed the intended graph. The connectome-specific question is
+therefore settled for this project: these experiments provide no evidence that
+the fly-connectome structure improves detection.
+
 ## Closed-loop result
 
 The system now demonstrates the complete defensive cycle:
@@ -7,7 +25,7 @@ The system now demonstrates the complete defensive cycle:
 1. every typed reflex result emits pain upstream, whether or not it acts;
 2. Jev pain and independent statistical anomaly channels stimulate the brain;
 3. a three-event sliding window and leaky accumulator build pressure;
-4. crossing 0.4 triggers simulated host isolation;
+4. crossing the validation-selected threshold triggers a response strategy;
 5. the attacker changes to `contained`, removing malicious telemetry offsets;
 6. drive receives immediate 85% relief and continues falling on later events.
 
@@ -33,7 +51,8 @@ anomaly channel, the same predeclared search selected window 3, decay 0.75,
 stimulation floor 0.25, and threshold 1.0. It reached 100% attack-episode
 detection, 0% benign-episode false actions, and mean containment step 9.0.
 `artifacts/drive-validation.json` records the selection. Evaluation seeds were
-not used.
+not used. This is sequential, episode-level synthetic validation; it is not the
+mixed record-level benchmark below.
 
 ## Held-out synthetic evaluation
 
@@ -81,19 +100,22 @@ mixed set for which real cached Jev responses exist without new network calls.
 | B5 random sparse graph | 0.591 | 0.910 | 0.717 | 0.630 | 0.749 | 0.754 |
 | B6 anomaly baseline | 0.569 | 0.950 | 0.712 | 0.720 | 0.725 | 0.725 |
 
-The combined score ranks records slightly better than B6, but its selected F1
-is lower. B4 and B5 outperform the intended graph. The defensible conclusion
-is that the combined system roughly matches B6 in ranking quality and
-underperforms it at the selected operating point; it does not establish a
-connectome advantage. F1-maximizing thresholds also produce unacceptable
-false-positive rates.
+The combined score ranks records marginally better than B6: ROC-AUC is 0.734
+versus 0.725. That ranking gain does not translate into better decisions at the
+selected thresholds. Combined F1 is lower (0.692 versus 0.712) and precision is
+lower (0.563 versus 0.569). Its FPR is marginally lower than B6's (0.700 versus
+0.720), but a 70% false-positive rate is still unusable. B4 and B5 both match or
+outperform the intended topology here, consistent with every earlier control
+round. The settled finding is that the combined system does not establish a
+connectome-specific advantage and is not a better detector than B6.
 
 `artifacts/detection-quality.json` contains detection-rate/FPR pairs at every
 threshold from 0.0 through 1.0 in increments of 0.05.
 
 ### Jev discrimination diagnosis
 
-The original pain calculation discarded useful ordering:
+The original pain calculation discarded and inverted useful ordering. Fixing
+that extraction bug is a concrete engineering result:
 
 | Validation score | ROC-AUC | PR-AUC |
 | --- | ---: | ---: |
@@ -115,8 +137,9 @@ an IsolationForest/autoencoder ensemble calibrated without held-out labels.
 KC-to-MBON training changed all 96 eligible intended-graph edges. On validation,
 training improved the combined graph only from ROC-AUC 0.6592 to 0.6673 and
 PR-AUC 0.6557 to 0.6597. Most useful discrimination comes from the independent
-anomaly signal, not learned MBON weights. B5 changed no effective weight despite
-having 19 eligible edges because its observed KC update was zero.
+anomaly signal, not learned MBON weights. The brain component added only about
+0.008 ROC-AUC over the untrained dual-input graph. B5 changed no effective
+weight despite having 19 eligible edges because its observed KC update was zero.
 
 UNSW source/destination addresses were intentionally excluded, and role/segment
 metadata are synthetic. The mixed benchmark therefore measures record-level
@@ -158,10 +181,12 @@ effect beyond the untrained graph.
 
 ## Controls and interpretation
 
-B4 and B5 also contained every episode. They were slower than B2/B3, but this
-small synthetic evaluation is not an ablation result and does not support a
-claim that FlyWire-specific topology caused the outcome. The composite drive
-includes a shared sensory-pressure term; that term can carry the random graph.
+B4 and B5 also contained every episode. Across the historical synthetic run,
+validation analysis, and final mixed benchmark, these controls consistently
+matched or outperformed the intended topology. This is now a settled negative
+result: the tested FlyWire-inspired structure contributes no measurable
+detection advantage. The composite drive includes shared sensory and anomaly
+terms that can carry shuffled and random graphs.
 
 The held-out UNSW Worms set contains only attacks and cannot provide a false-
 action rate. Historical public-data metrics should not be conflated with the
